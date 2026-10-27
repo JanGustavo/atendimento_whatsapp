@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Atendimento</title>
+<script src="/static/htmx.min.js" defer></script>
+<style>body{font:16px system-ui;max-width:980px;margin:2rem auto;padding:0 1rem;background:#f6f8f7;color:#172b26}header,section{background:white;padding:1rem;margin:1rem 0;border-radius:8px}nav{display:flex;gap:1rem}input,select,button,textarea{font:inherit;padding:.45rem;margin:.2rem}button{cursor:pointer}article{border-top:1px solid #ddd;padding:.6rem}small{color:#60736d}.erro{color:#a11}</style>
+</head><body><header><strong>Distribuidora · Atendimento</strong>{% if user %}<nav><a href="/atendimentos">Meus atendimentos</a>{% if user.role == 'gestor' %}<a href="/gestor">Gestor</a><a href="/simulador">Simulador</a>{% endif %}<form action="/sair" method="post"><button>Sair</button></form></nav><small>{{ user.nome }} · {{ user.role }}</small>{% endif %}</header>
+{% block body %}{% endblock %}</body></html>

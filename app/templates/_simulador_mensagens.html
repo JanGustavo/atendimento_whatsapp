@@ -1,0 +1,1 @@
+{% for mensagem in mensagens %}<article><small>{{ mensagem.origem }} · {{ mensagem.criada_em }}</small><p>{{ mensagem.texto }}</p></article>{% else %}<p>Envie uma mensagem para iniciar.</p>{% endfor %}

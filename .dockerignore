@@ -1,0 +1,13 @@
+.env
+.git
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+*.db
+*.db-*
+*.egg-info
+tests
+frontend/node_modules
+frontend/dist
+app/web

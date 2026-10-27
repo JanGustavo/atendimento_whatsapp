@@ -1,0 +1,1 @@
+{% for mensagem in mensagens %}<article><small>{{ mensagem.origem }} · {{ mensagem.criada_em }}{% if mensagem.envio_status %} · {{ mensagem.envio_status }}{% endif %}</small><p>{{ mensagem.texto }}</p></article>{% endfor %}

@@ -1,0 +1,353 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import Chamados from './Chamados.jsx'
+
+const roleName = { gestor: 'Gestor', vendedor: 'Vendedor', responsavel: 'Responsável' }
+const stageName = {
+  menu_setor: 'Escolhendo setor', menu_vendedor: 'Escolhendo vendedor',
+  atribuida: 'Em atendimento', aviso_transferencia: 'Aguardando resposta', encerrada: 'Encerrada',
+}
+
+async function getJSON(path) {
+  const response = await fetch(path, { credentials: 'same-origin' })
+  if (!response.ok) throw new Error(response.status === 401 ? 'Sessão encerrada. Entre novamente.' : `Falha ao carregar (${response.status}).`)
+  return response.json()
+}
+
+async function postForm(path, values) {
+  const body = new URLSearchParams()
+  Object.entries(values).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) body.set(key, String(value))
+  })
+  const response = await fetch(path, {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+    body,
+  })
+  if (!response.ok) {
+    let message = `Não foi possível concluir (${response.status}).`
+    try {
+      const data = await response.json()
+      if (data.detail) message = typeof data.detail === 'string' ? data.detail : message
+    } catch { /* Rotas antigas também podem retornar HTML. */ }
+    throw new Error(message)
+  }
+}
+
+function time(value) {
+  if (!value) return ''
+  const date = new Date(value.endsWith('Z') ? value : `${value}Z`)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+function initials(name = '') {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0].toUpperCase()).join('') || 'FG'
+}
+
+function Brand({ compact = false }) {
+  return <div className={`brand ${compact ? 'brand-compact' : ''}`}>
+    <svg className="brand-symbol" viewBox="0 0 76 42" aria-hidden="true">
+      <path d="M5 25C20 11 45 7 70 19M22 19C34 5 48 2 67 9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      <path d="M10 29C26 21 47 22 66 29" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      <circle cx="20" cy="32" r="3" fill="currentColor" /><circle cx="59" cy="32" r="3" fill="currentColor" />
+    </svg>
+    <div><div className="brand-name">Fort<span>Giro</span></div>{!compact && <div className="brand-subtitle">DISTRIBUIDORA DE AUTOPEÇAS</div>}</div>
+  </div>
+}
+
+function Icon({ name, size = 19 }) {
+  const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
+  const paths = {
+    inbox: <><path d="M4 5h16v11H4z"/><path d="M4 14h5l1.5 2h3L15 14h5v5H4z"/></>,
+    grid: <><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></>,
+    chat: <><path d="M4 5h16v12H9l-5 4z"/><path d="M8 9h8M8 13h5"/></>,
+    logout: <><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"/></>,
+    search: <><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></>,
+    send: <><path d="m3 11 18-8-7 18-3-8z"/><path d="m11 13 10-10"/></>,
+    arrow: <path d="m5 12 14 0m-6-6 6 6-6 6"/>,
+    ticket: <><path d="M4 3h16v18l-4-2-4 2-4-2-4 2z"/><path d="M8 8h8M8 12h8"/></>,
+    users: <><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 5v1"/></>,
+  }
+  return <svg {...common}>{paths[name]}</svg>
+}
+
+function Badge({ status, children }) {
+  return <span className={`badge badge-${status === 'aberta' ? 'open' : status === 'encerrada' ? 'closed' : 'neutral'}`}>{children || (status === 'aberta' ? 'Aberta' : 'Encerrada')}</span>
+}
+
+function Login({ onLogin, busy, error }) {
+  const [email, setEmail] = useState('')
+  const [senha, setSenha] = useState('')
+  return <div className="login-layout">
+    <aside className="login-art">
+      <Brand />
+      <div className="login-art-center">
+        <div className="art-orbit art-orbit-one" /><div className="art-orbit art-orbit-two" />
+        <svg className="art-car" viewBox="0 0 560 270" aria-hidden="true"><path d="M40 165c50-40 108-55 173-58 42-50 92-75 156-77 60-2 102 24 142 75l28 14"/><path d="M61 176c118-32 304-38 444 0"/><path d="M175 112c100-12 195-13 299-5"/><circle cx="151" cy="184" r="27"/><circle cx="451" cy="184" r="27"/></svg>
+        <p className="art-kicker">ATENDIMENTO QUE ACOMPANHA O SEU RITMO</p>
+        <h1>Conexões que<br /><em>movem</em> negócios.</h1>
+        <p className="art-description">Uma central simples para cada conversa, cada cliente e cada oportunidade.</p>
+      </div>
+      <div className="login-art-footer">FortGiro · Distribuidora de autopeças</div>
+    </aside>
+    <main className="login-main"><div className="login-box">
+      <div className="login-mobile-brand"><Brand compact /></div>
+      <div className="eyebrow">ÁREA DA EQUIPE</div>
+      <h2>Bem-vindo de volta</h2>
+      <p className="muted">Acesse sua central de atendimento.</p>
+      <form onSubmit={event => { event.preventDefault(); onLogin({ email, senha }) }}>
+        <label>Email<input autoComplete="username" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="seuemail@empresa.com" required /></label>
+        <label>Senha<input autoComplete="current-password" type="password" value={senha} onChange={event => setSenha(event.target.value)} placeholder="Sua senha" required /></label>
+        {error && <div className="form-error" role="alert">{error}</div>}
+        <button className="button button-primary button-wide" disabled={busy}> {busy ? 'Entrando...' : 'Entrar na plataforma'} <Icon name="arrow" size={18}/></button>
+      </form>
+      <p className="login-footnote">Acesso exclusivo para a equipe FortGiro.</p>
+    </div></main>
+  </div>
+}
+
+function MessageBubbles({ messages, simulator = false }) {
+  const bottom = React.useRef(null)
+  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }) }, [messages.length])
+  if (!messages.length) return <div className="empty-chat"><div className="empty-chat-icon"><Icon name="chat" size={28}/></div><strong>Nenhuma mensagem ainda</strong><span>As mensagens aparecerão aqui.</span></div>
+  return <div className="messages-scroll">
+    {messages.map(message => {
+      const outgoing = simulator ? message.origem === 'cliente' : message.origem === 'humano'
+      const label = message.origem === 'cliente' ? 'Cliente' : message.origem === 'bot' ? 'Assistente' : 'Equipe'
+      return <div className={`message-row ${outgoing ? 'message-outgoing' : ''}`} key={message.id}>
+        <div className={`message-bubble ${outgoing ? 'message-bubble-outgoing' : ''}`}>
+          <div className="message-label">{label}</div><div className="message-text">{message.texto}</div><time>{time(message.criada_em)}{message.envio_status === 'falhou' ? ' · Falhou' : ''}</time>
+        </div>
+      </div>
+    })}
+    <div ref={bottom} />
+  </div>
+}
+
+function Inbox({ me, conversations, selectedId, onSelect, detail, search, setSearch, onSend, onClose, busy }) {
+  const [draft, setDraft] = useState('')
+  useEffect(() => setDraft(''), [selectedId])
+  const selected = detail?.conversa
+  return <div className="inbox-layout">
+    <aside className="conversation-pane">
+      <div className="pane-heading"><div><div className="eyebrow">CENTRAL</div><h2>{me.role === 'gestor' ? 'Conversas' : 'Meus atendimentos'}</h2></div><span className="count-chip">{conversations.length}</span></div>
+      <div className="search-box"><Icon name="search" size={17}/><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar número" aria-label="Buscar conversas" /></div>
+      <div className="conversation-items">
+        {conversations.map(conversa => <button className={`conversation-item ${selectedId === conversa.id ? 'selected' : ''}`} key={conversa.id} onClick={() => onSelect(conversa.id)}>
+          <span className="conversation-avatar">{conversa.numero.slice(-2)}</span>
+          <span className="conversation-item-main"><strong>{conversa.numero}</strong><small>{conversa.setor_nome || stageName[conversa.etapa] || 'Novo atendimento'}</small></span>
+          <span className="conversation-item-meta"><time>{time(conversa.criada_em).split(',').pop()}</time><i className={conversa.status === 'aberta' ? 'status-dot' : 'status-dot status-dot-muted'} /></span>
+        </button>)}
+        {!conversations.length && <div className="empty-list">Nenhuma conversa encontrada.</div>}
+      </div>
+    </aside>
+    <section className="chat-pane">
+      {!selected ? <div className="chat-placeholder"><div className="placeholder-mark"><Icon name="chat" size={42}/></div><h2>Seu atendimento, em um só lugar.</h2><p>Escolha uma conversa para acompanhar o histórico e responder.</p></div> : <>
+        <div className="chat-header"><div className="chat-person"><div className="conversation-avatar large">{selected.numero.slice(-2)}</div><div><h3>{selected.numero}</h3><p>{selected.setor_nome || 'Aguardando setor'} · {selected.atribuido_nome || 'Sem atribuição'}</p></div></div><Badge status={selected.status}/></div>
+        <div className="chat-stage"><span>Etapa: {stageName[selected.etapa] || selected.etapa}</span>{selected.timer_prazo_em && !selected.primeira_resposta_em && <span>Prazo: {time(selected.timer_prazo_em)}</span>}</div>
+        <MessageBubbles messages={detail.mensagens} />
+        {selected.status === 'aberta' ? <div className="chat-composer"><form onSubmit={async event => { event.preventDefault(); if (!draft.trim()) return; if (await onSend(selected.id, draft.trim())) setDraft('') }}><textarea value={draft} onChange={event => setDraft(event.target.value)} placeholder="Escreva sua resposta..." rows="2" maxLength="4000" required /><button className="button button-primary" disabled={busy || !draft.trim()} title="Enviar resposta"><Icon name="send" size={18}/><span>Enviar</span></button></form><button className="text-button" disabled={busy} onClick={() => onClose(selected.id)}>Encerrar conversa</button></div> : <div className="closed-note">Esta conversa foi encerrada.</div>}
+      </>}
+    </section>
+  </div>
+}
+
+function UserEditor({ user, onSave, busy }) {
+  const [value, setValue] = useState({ ...user, senha: '' })
+  return <form className="user-row" onSubmit={event => { event.preventDefault(); onSave(user.id, value) }}>
+    <div className="user-identity"><span className="user-avatar">{initials(value.nome)}</span><span><input aria-label="Nome" value={value.nome} onChange={event => setValue({ ...value, nome: event.target.value })} required /><small>#{user.id}</small></span></div>
+    <input aria-label="Email" type="email" value={value.email} onChange={event => setValue({ ...value, email: event.target.value })} required />
+    <select aria-label="Papel" value={value.role} onChange={event => setValue({ ...value, role: event.target.value })}><option value="vendedor">Vendedor</option><option value="responsavel">Responsável</option><option value="gestor">Gestor</option></select>
+    <label className="switch-line"><input type="checkbox" checked={value.ativo} onChange={event => setValue({ ...value, ativo: event.target.checked })} /><span>Ativo</span></label>
+    <label className="switch-line"><input type="checkbox" checked={value.online} onChange={event => setValue({ ...value, online: event.target.checked })} /><span>Online</span></label>
+    <input aria-label="Nova senha opcional" type="password" placeholder="Nova senha" minLength="8" value={value.senha} onChange={event => setValue({ ...value, senha: event.target.value })} />
+    <button className="button button-soft" disabled={busy}>Salvar</button>
+  </form>
+}
+
+function SectorEditor({ sector, users, onSave, busy }) {
+  const [nome, setNome] = useState(sector.nome)
+  const [responsavel, setResponsavel] = useState(sector.responsavel_id || '')
+  return <form className="sector-row" onSubmit={event => { event.preventDefault(); onSave(sector.id, { nome, responsavel_id: responsavel }) }}>
+    <span className="sector-number">{String(sector.ordem).padStart(2, '0')}</span>
+    <input aria-label={`Nome do setor ${sector.ordem}`} value={nome} onChange={event => setNome(event.target.value)} required />
+    <select aria-label={`Responsável pelo setor ${sector.ordem}`} value={responsavel} onChange={event => setResponsavel(event.target.value)} disabled={sector.ordem === 1}>
+      <option value="">{sector.ordem === 1 ? 'Distribuição entre vendedores' : 'Selecionar responsável'}</option>
+      {users.filter(item => item.role === 'responsavel' && item.ativo).map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}
+    </select>
+    <button className="button button-soft" disabled={busy}>Salvar</button>
+  </form>
+}
+
+function Manager({ conversations, config, whatsappStatus, vendorFilter, setVendorFilter, onOpen, onTransfer, onCreateUser, onSaveUser, onSaveSector, busy }) {
+  const [newUser, setNewUser] = useState({ nome: '', email: '', senha: '', role: 'vendedor' })
+  const [transfers, setTransfers] = useState({})
+  const [tab, setTab] = useState('conversas')
+  const users = config?.usuarios || []
+  const sectors = config?.setores || []
+  const open = conversations.filter(item => item.status === 'aberta').length
+  const waiting = conversations.filter(item => item.status === 'aberta' && !item.atribuido_id).length
+  const online = users.filter(item => item.role === 'vendedor' && item.ativo && item.online).length
+  const visibleConversations = vendorFilter ? conversations.filter(item => String(item.atribuido_id) === vendorFilter) : conversations
+  return <div className="manager-page">
+    <div className="page-intro"><div><div className="eyebrow">VISÃO GERAL</div><h1>Gestão do atendimento</h1><p>Acompanhe conversas, equipe e distribuição em tempo real.</p></div><div className="live-indicator"><span /> Atualização automática</div></div>
+    <div className="stat-grid">
+      <div className="stat-card"><span>Conversas abertas</span><strong>{open}</strong><small>Em toda a operação</small></div>
+      <div className="stat-card"><span>Aguardando setor</span><strong>{waiting}</strong><small>Ainda sem responsável</small></div>
+      <div className="stat-card stat-card-gold"><span>Vendedores online</span><strong>{online}</strong><small>Disponíveis para distribuição</small></div>
+      <div className="stat-card"><span>WhatsApp</span><strong>{whatsappStatus || 'Verificando'}</strong><small>Estado da instância</small></div>
+    </div>
+    <div className="section-tabs"><button className={tab === 'conversas' ? 'active' : ''} onClick={() => setTab('conversas')}>Conversas</button><button className={tab === 'equipe' ? 'active' : ''} onClick={() => setTab('equipe')}>Equipe</button><button className={tab === 'setores' ? 'active' : ''} onClick={() => setTab('setores')}>Setores</button></div>
+    {tab === 'conversas' && <section className="surface manager-section"><div className="section-heading"><div><h2>Todas as conversas</h2><p>Abra uma conversa ou transfira para outro atendente.</p></div><label className="filter-label">Vendedor <select value={vendorFilter} onChange={event => setVendorFilter(event.target.value)}><option value="">Todos</option>{users.filter(item => item.role === 'vendedor').map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></label></div>
+      <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Setor</th><th>Responsável</th><th>Status</th><th>Transferir</th></tr></thead><tbody>
+        {visibleConversations.map(conversa => {
+          const options = conversa.setor_ordem ? users.filter(item => item.ativo && item.role === (conversa.setor_ordem === 1 ? 'vendedor' : 'responsavel') && item.id !== conversa.atribuido_id) : []
+          return <tr key={conversa.id}><td><button className="table-link" onClick={() => onOpen(conversa.id)}>{conversa.numero}</button><small>{time(conversa.criada_em)}</small></td><td>{conversa.setor_nome || 'Escolhendo'}</td><td>{conversa.atribuido_nome || '—'}</td><td><Badge status={conversa.status}/></td><td><div className="transfer-cell"><select value={transfers[conversa.id] || ''} onChange={event => setTransfers({ ...transfers, [conversa.id]: event.target.value })}><option value="">Selecionar</option>{options.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select><button className="button button-soft" disabled={busy || !transfers[conversa.id] || conversa.status !== 'aberta'} onClick={() => onTransfer(conversa.id, transfers[conversa.id])}>Mover</button></div></td></tr>
+        })}
+        {!visibleConversations.length && <tr><td colSpan="5" className="empty-table">Nenhuma conversa por enquanto.</td></tr>}
+      </tbody></table></div>
+    </section>}
+    {tab === 'equipe' && <section className="surface manager-section"><div className="section-heading"><div><h2>Equipe</h2><p>Somente gestores podem criar e editar acessos.</p></div><span className="count-chip">{users.length} usuários</span></div>
+      <form className="create-user" onSubmit={async event => { event.preventDefault(); if (await onCreateUser(newUser)) setNewUser({ nome: '', email: '', senha: '', role: 'vendedor' }) }}><input placeholder="Nome" value={newUser.nome} onChange={event => setNewUser({ ...newUser, nome: event.target.value })} required /><input type="email" placeholder="Email" value={newUser.email} onChange={event => setNewUser({ ...newUser, email: event.target.value })} required /><input type="password" placeholder="Senha (8+ caracteres)" minLength="8" value={newUser.senha} onChange={event => setNewUser({ ...newUser, senha: event.target.value })} required /><select value={newUser.role} onChange={event => setNewUser({ ...newUser, role: event.target.value })}><option value="vendedor">Vendedor</option><option value="responsavel">Responsável</option><option value="gestor">Gestor</option></select><button className="button button-primary" disabled={busy}>Criar usuário</button></form>
+      <div className="user-list">{users.map(item => <UserEditor key={item.id} user={item} onSave={onSaveUser} busy={busy}/>)}</div>
+    </section>}
+    {tab === 'setores' && <section className="surface manager-section"><div className="section-heading"><div><h2>Setores e responsáveis</h2><p>Os nomes aparecem no menu enviado ao cliente.</p></div></div><div className="sector-list">{sectors.map(item => <SectorEditor key={item.id} sector={item} users={users} onSave={onSaveSector} busy={busy}/>)}</div></section>}
+  </div>
+}
+
+function Simulator({ data, client, setClient, onSend, busy }) {
+  const [draft, setDraft] = useState('')
+  const chosen = data?.clientes?.find(item => item.id === client)
+  return <div className="sim-page"><div className="page-intro"><div><div className="eyebrow">AMBIENTE DE TESTE</div><h1>Simulador</h1><p>Teste o fluxo do bot com clientes fictícios antes de conectar o WhatsApp.</p></div><div className="demo-pill">SIMULADO</div></div>
+    <div className="sim-grid"><section className="surface sim-main"><div className="sim-header"><div className="sim-avatar">{chosen?.nome?.slice(-1) || '1'}</div><div><h2>{chosen?.nome || 'Cliente'}</h2><p>{chosen?.numero || ''}</p></div><Badge status={data?.status || 'novo'}>{data?.status === 'encerrada' ? 'Encerrada' : 'Simulação ativa'}</Badge></div>
+      <div className="sim-conversation"><MessageBubbles messages={data?.mensagens || []} simulator /></div>
+      <form className="sim-composer" onSubmit={async event => { event.preventDefault(); if (!draft.trim()) return; if (await onSend(client, draft.trim())) setDraft('') }}><input value={draft} onChange={event => setDraft(event.target.value)} placeholder="Digite como se fosse o cliente..." maxLength="4000" required /><button className="button button-primary" disabled={busy || !draft.trim()}><Icon name="send" size={18}/><span>Enviar</span></button></form>
+    </section><aside className="sim-side"><section className="surface sim-side-card"><div className="eyebrow">CLIENTE FICTÍCIO</div><h3>Escolha um número</h3><div className="client-list">{(data?.clientes || []).map(item => <button key={item.id} className={client === item.id ? 'active' : ''} onClick={() => setClient(item.id)}><span className="mini-avatar">{item.nome.slice(-1)}</span><span><strong>{item.nome}</strong><small>{item.numero}</small></span></button>)}</div></section><section className="surface sim-side-card guide-card"><div className="eyebrow">ROTEIRO RÁPIDO</div><h3>Como testar</h3><ol><li>Envie uma saudação para ver o menu.</li><li>Escolha <strong>1</strong> para Vendas ou <strong>2–4</strong> para outro setor.</li><li>Em Vendas, escolha um vendedor ou <strong>0</strong> para o próximo disponível.</li></ol><p>Depois da atribuição, o bot só volta a falar se o timer disparar.</p></section></aside></div>
+  </div>
+}
+
+export default function App() {
+  const [me, setMe] = useState(undefined)
+  const [page, setPage] = useState('inbox')
+  const [conversations, setConversations] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
+  const [detail, setDetail] = useState(null)
+  const [config, setConfig] = useState(null)
+  const [whatsappStatus, setWhatsappStatus] = useState(null)
+  const [simData, setSimData] = useState(null)
+  const [chamados, setChamados] = useState([])
+  const [computadores, setComputadores] = useState([])
+  const [client, setClient] = useState('cliente1')
+  const [search, setSearch] = useState('')
+  const [vendorFilter, setVendorFilter] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    getJSON('/api/me').then(user => { setMe(user); setPage(user.role === 'gestor' ? 'manager' : 'inbox') }).catch(() => setMe(null))
+  }, [])
+
+  const refreshConversations = useCallback(async () => {
+    if (!me) return
+    const query = new URLSearchParams()
+    if (page === 'inbox' && search.trim()) query.set('q', search.trim())
+    try { setConversations(await getJSON(`/api/conversas?${query}`)) } catch (failure) { setError(failure.message) }
+  }, [me, page, search])
+
+  const refreshDetail = useCallback(async () => {
+    if (!selectedId || page !== 'inbox') return
+    try { setDetail(await getJSON(`/api/conversas/${selectedId}`)) }
+    catch (failure) { setDetail(null); setError(failure.message) }
+  }, [selectedId, page])
+
+  const refreshConfig = useCallback(async () => {
+    if (me?.role !== 'gestor') return
+    try { setConfig(await getJSON('/api/gestor/config')) } catch (failure) { setError(failure.message) }
+  }, [me])
+
+  const refreshTickets = useCallback(async () => {
+    if (me?.role !== 'gestor' && me?.role !== 'responsavel') return
+    try {
+      const [lista, pcs] = await Promise.all([getJSON('/api/chamados'), getJSON('/api/computadores')])
+      setChamados(lista); setComputadores(pcs)
+    } catch (failure) { setError(failure.message) }
+  }, [me])
+
+  const refreshSimulator = useCallback(async () => {
+    if (page !== 'simulator') return
+    try { setSimData(await getJSON(`/api/simulador?cliente=${client}`)) } catch (failure) { setError(failure.message) }
+  }, [page, client])
+
+  useEffect(() => {
+    if (!me || (page !== 'inbox' && page !== 'manager')) return
+    refreshConversations()
+    const interval = setInterval(refreshConversations, 3000)
+    return () => clearInterval(interval)
+  }, [me, page, refreshConversations])
+  useEffect(() => {
+    if (!selectedId || page !== 'inbox') return
+    refreshDetail()
+    const interval = setInterval(refreshDetail, 3000)
+    return () => clearInterval(interval)
+  }, [selectedId, page, refreshDetail])
+  useEffect(() => {
+    if (page !== 'manager') return
+    refreshConfig()
+    const refreshStatus = () => getJSON('/api/gestor/whatsapp-status').then(data => setWhatsappStatus(data.status)).catch(() => setWhatsappStatus('desconectado'))
+    refreshStatus()
+    const interval = setInterval(refreshStatus, 10000)
+    return () => clearInterval(interval)
+  }, [page, refreshConfig])
+  useEffect(() => {
+    if (page !== 'tickets') return
+    refreshTickets()
+    const interval = setInterval(refreshTickets, 3000)
+    return () => clearInterval(interval)
+  }, [page, refreshTickets])
+  useEffect(() => {
+    if (page !== 'simulator') return
+    refreshSimulator()
+    const interval = setInterval(refreshSimulator, 3000)
+    return () => clearInterval(interval)
+  }, [page, refreshSimulator])
+
+  async function login(values) {
+    setBusy(true); setError('')
+    try { await postForm('/login', values); const user = await getJSON('/api/me'); setMe(user); setPage(user.role === 'gestor' ? 'manager' : 'inbox') }
+    catch { setError('Email ou senha inválidos.') }
+    finally { setBusy(false) }
+  }
+
+  async function logout() {
+    try { await postForm('/sair', {}) } catch { /* O estado local também é limpo. */ }
+    setMe(null); setDetail(null); setConversations([]); setError('')
+  }
+
+  async function action(path, values, success = 'Alterações salvas.') {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await postForm(path, values)
+      setNotice(success)
+      await Promise.all([refreshConversations(), refreshDetail(), refreshConfig(), refreshSimulator(), refreshTickets()])
+      return true
+    } catch (failure) { setError(failure.message); await Promise.all([refreshConversations(), refreshDetail(), refreshTickets()]); return false }
+    finally { setBusy(false) }
+  }
+
+  function navigate(next) { setPage(next); setError(''); setNotice('') }
+  const headerTitle = useMemo(() => page === 'manager' ? 'Gestão' : page === 'simulator' ? 'Simulador' : page === 'tickets' ? 'Chamados' : 'Atendimentos', [page])
+
+  if (me === undefined) return <div className="loading-screen"><Brand compact /><div className="loading-bar" /></div>
+  if (me === null) return <Login onLogin={login} busy={busy} error={error}/>
+
+  return <div className="app-shell">
+    <aside className="sidebar"><div className="sidebar-top"><Brand /><div className="sidebar-caption">PAINEL DE CONTROLE</div><nav aria-label="Navegação principal"><button className={page === 'inbox' ? 'active' : ''} onClick={() => navigate('inbox')}><Icon name="inbox" />Atendimentos</button>{(me.role === 'gestor' || me.role === 'responsavel') && <button className={page === 'tickets' ? 'active' : ''} onClick={() => navigate('tickets')}><Icon name="ticket" />Chamados</button>}{me.role === 'gestor' && <><button className={page === 'manager' ? 'active' : ''} onClick={() => navigate('manager')}><Icon name="grid" />Visão do gestor</button><button className={page === 'simulator' ? 'active' : ''} onClick={() => navigate('simulator')}><Icon name="chat" />Simulador</button></>}</nav></div><div className="sidebar-bottom"><div className="sidebar-help"><span className="help-dot"/>Central FortGiro <small>Atendimento em operação</small></div><div className="sidebar-user"><span className="user-avatar">{initials(me.nome)}</span><span><strong>{me.nome}</strong><small>{roleName[me.role] || me.role}</small></span><button onClick={logout} title="Sair" aria-label="Sair"><Icon name="logout" /></button></div></div></aside>
+    <main className="main-area"><header className="topbar"><div className="breadcrumb">FortGiro <span>/</span> <strong>{headerTitle}</strong></div><div className="topbar-right"><span className="topbar-date">{new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</span><span className="topbar-avatar">{initials(me.nome)}</span></div></header>
+      {(error || notice) && <div className={`toast ${error ? 'toast-error' : 'toast-success'}`} role="status">{error || notice}<button onClick={() => { setError(''); setNotice('') }}>×</button></div>}
+      {page === 'inbox' && <Inbox me={me} conversations={conversations} selectedId={selectedId} onSelect={id => { setSelectedId(id); setDetail(null) }} detail={detail} search={search} setSearch={setSearch} busy={busy} onSend={(id, texto) => action(`/atendimentos/${id}/mensagens`, { texto }, 'Resposta enviada.')} onClose={id => action(`/atendimentos/${id}/encerrar`, {}, 'Conversa encerrada.').then(ok => { if (ok) { setSelectedId(null); setDetail(null) } })}/>}
+      {page === 'manager' && <Manager conversations={conversations} config={config} whatsappStatus={whatsappStatus} vendorFilter={vendorFilter} setVendorFilter={setVendorFilter} busy={busy} onOpen={id => { setSelectedId(id); setDetail(null); navigate('inbox') }} onTransfer={(id, usuario_id) => action(`/gestor/conversas/${id}/transferir`, { usuario_id }, 'Conversa transferida.')} onCreateUser={values => action('/gestor/usuarios', values, 'Usuário criado.')} onSaveUser={(id, values) => action(`/gestor/usuarios/${id}`, { nome: values.nome, email: values.email, role: values.role, ativo: values.ativo ? 'on' : '', online: values.online ? 'on' : '', senha: values.senha }, 'Usuário atualizado.')} onSaveSector={(id, values) => action(`/gestor/setores/${id}`, values, 'Setor atualizado.')}/>}
+      {page === 'tickets' && <Chamados me={me} chamados={chamados} computadores={computadores} usuarios={config?.usuarios || []} busy={busy} onRequest={id => action(`/api/chamados/${id}/acessos`, {}, 'Acesso remoto simulado e registrado.')} onClose={(id, solucao) => action(`/api/chamados/${id}/fechar`, { solucao }, 'Chamado fechado com solução registrada.')} onCreateComputer={values => action('/api/computadores', values, 'Computador cadastrado.')} />}
+      {page === 'simulator' && <Simulator data={simData} client={client} setClient={setClient} busy={busy} onSend={(cliente, texto) => action('/simulador', { cliente, texto }, 'Mensagem enviada no simulador.')}/>}
+    </main>
+  </div>
+}

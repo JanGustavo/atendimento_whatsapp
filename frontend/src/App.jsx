@@ -45,12 +45,7 @@ function initials(name = '') {
 
 function Brand({ compact = false }) {
   return <div className={`brand ${compact ? 'brand-compact' : ''}`}>
-    <svg className="brand-symbol" viewBox="0 0 76 42" aria-hidden="true">
-      <path d="M5 25C20 11 45 7 70 19M22 19C34 5 48 2 67 9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-      <path d="M10 29C26 21 47 22 66 29" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-      <circle cx="20" cy="32" r="3" fill="currentColor" /><circle cx="59" cy="32" r="3" fill="currentColor" />
-    </svg>
-    <div><div className="brand-name">Fort<span>Giro</span></div>{!compact && <div className="brand-subtitle">DISTRIBUIDORA DE AUTOPEÇAS</div>}</div>
+    <img className="brand-logo" src="/static/fortgiro-logo.png" alt="FortGiro · Distribuidora de Autopeças" />
   </div>
 }
 
@@ -82,7 +77,6 @@ function Login({ onLogin, busy, error }) {
       <Brand />
       <div className="login-art-center">
         <div className="art-orbit art-orbit-one" /><div className="art-orbit art-orbit-two" />
-        <svg className="art-car" viewBox="0 0 560 270" aria-hidden="true"><path d="M40 165c50-40 108-55 173-58 42-50 92-75 156-77 60-2 102 24 142 75l28 14"/><path d="M61 176c118-32 304-38 444 0"/><path d="M175 112c100-12 195-13 299-5"/><circle cx="151" cy="184" r="27"/><circle cx="451" cy="184" r="27"/></svg>
         <p className="art-kicker">ATENDIMENTO QUE ACOMPANHA O SEU RITMO</p>
         <h1>Conexões que<br /><em>movem</em> negócios.</h1>
         <p className="art-description">Uma central simples para cada conversa, cada cliente e cada oportunidade.</p>

@@ -1,20 +1,16 @@
 """Aplica as transições do chatbot e executa os prazos persistidos."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.utils import now
 from app.models import Atribuicao, Conversa, Mensagem, Setor, Usuario
 from app.providers import MensagemEntrada, WhatsAppProvider
 from app.services.chatbot import MENU_SETOR, processar_mensagem
-
-
-def now() -> datetime:
-    """UTC sem timezone porque SQLite devolve DATETIME sem timezone."""
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def menu_vendedores(vendedores: list[Usuario]) -> str:

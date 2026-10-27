@@ -1,13 +1,10 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-
-
-def agora() -> datetime:
-    return datetime.now(UTC)
+from app.core.utils import now as agora  # agora() → now() centralizado
 
 
 class Usuario(Base):

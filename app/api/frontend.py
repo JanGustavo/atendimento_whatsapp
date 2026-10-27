@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import UsuarioAtual, get_current_user, somente_gestor
-from app.api.painel import conversa_visivel
+from app.api.atendimentos import conversa_visivel
 from app.providers import CLIENTES, provider_atual
 from app.core.database import get_db
 from app.models import Atribuicao, Conversa, Mensagem, Setor, Usuario
@@ -47,7 +47,7 @@ async def me(user: UsuarioAtual = Depends(get_current_user)):
     return {"id": user.user_id, "nome": user.nome, "role": user.role}
 
 
-@router.get("/conversas")
+@router.get("/atendimentos")
 async def conversas(
     q: str = "", vendedor: int | None = None,
     db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(get_current_user),
@@ -62,7 +62,7 @@ async def conversas(
     return [conversa_json(conversa) for conversa in (await db.execute(stmt)).scalars()]
 
 
-@router.get("/conversas/{conversa_id}")
+@router.get("/atendimentos/{conversa_id}")
 async def detalhe_conversa(
     conversa_id: int, db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(get_current_user),
 ):

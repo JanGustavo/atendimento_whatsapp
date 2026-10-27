@@ -1,28 +1,20 @@
 """Abertura de chamados e registro de pedidos de acesso remoto."""
 import hmac
-from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import UsuarioAtual, get_current_user, somente_gestor
-from app.api.painel import form
+from app.api._shared import form
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.utils import now as agora
 from app.models import AcessoRemoto, Chamado, Computador, Usuario
 from app.services.remoto import remoto_provider
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
-
-
-def agora() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
-
 
 def validar_token(token: str) -> None:
     esperado = get_settings().chamado_install_token
@@ -38,19 +30,16 @@ def suporte(user: UsuarioAtual = Depends(get_current_user)) -> UsuarioAtual:
     return user
 
 
-@router.get("/chamado", response_class=HTMLResponse)
-async def formulario_chamado(request: Request, token: str = "", db: AsyncSession = Depends(get_db)):
+@router.get("/api/chamado/computadores")
+async def computadores_publicos(response: Response, token: str = "", db: AsyncSession = Depends(get_db)):
     validar_token(token)
+    response.headers["Cache-Control"] = "no-store"
     computadores = (await db.execute(select(Computador).order_by(Computador.nome))).scalars().all()
-    resposta = templates.TemplateResponse("chamado.html", {
-        "request": request, "token": token, "computadores": computadores,
-    })
-    resposta.headers["Cache-Control"] = "no-store"
-    return resposta
+    return [{"id": item.id, "nome": item.nome} for item in computadores]
 
 
-@router.post("/chamado", response_class=HTMLResponse)
-async def abrir_chamado(request: Request, db: AsyncSession = Depends(get_db)):
+@router.post("/api/chamado")
+async def abrir_chamado(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     dados = await form(request)
     token = dados.get("token", "")
     validar_token(token)
@@ -62,11 +51,8 @@ async def abrir_chamado(request: Request, db: AsyncSession = Depends(get_db)):
     chamado = Chamado(computador_id=computador.id, descricao=descricao, status="aberto", criado_em=agora())
     db.add(chamado)
     await db.commit()
-    resposta = templates.TemplateResponse("chamado.html", {
-        "request": request, "token": token, "computadores": [computador], "chamado_id": chamado.id,
-    })
-    resposta.headers["Cache-Control"] = "no-store"
-    return resposta
+    response.headers["Cache-Control"] = "no-store"
+    return {"id": chamado.id, "status": chamado.status}
 
 
 @router.get("/api/chamados")

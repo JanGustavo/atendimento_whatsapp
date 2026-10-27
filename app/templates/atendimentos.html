@@ -1,1 +1,0 @@
-{% extends 'base.html' %}{% block body %}<section><h1>Meus atendimentos</h1><form method="get"><input name="q" value="{{ busca }}" placeholder="Buscar número"><button>Buscar</button></form><div hx-get="/atendimentos?q={{ busca|urlencode }}" hx-trigger="every 3s" hx-swap="innerHTML">{% include '_lista.html' %}</div></section>{% endblock %}

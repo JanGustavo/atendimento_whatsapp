@@ -7,6 +7,8 @@
 
 O React é compilado dentro do Docker e servido pelo próprio FastAPI; não há outro serviço de frontend. Para WhatsApp real, configure as variáveis `EVOLUTION_*` no `.env`, mude `WHATSAPP_PROVIDER=evolution` e suba `docker compose --profile evolution up --build`. A instância e o webhook precisam ser criados/pareados conforme `NOTAS.md`.
 
+O painel e o formulário de chamados usam React. A API JSON fica em `/api`; os testes rodam com `pytest tests/ -v` em um ambiente Python com as dependências de desenvolvimento instaladas.
+
 ## Chamados de computador
 
 O gestor cadastra os PCs na aba **Chamados** do painel. A equipe abre pedidos em `/chamado?token=<CHAMADO_INSTALL_TOKEN>`; o token vem do `.env` e pode ser colocado em um favorito/atalho do navegador de cada PC. O seed também cria quatro PCs de demonstração, incluindo o PC do dono. Gestor e responsável veem todos os pedidos, registram uma solicitação remota **simulada** e fecham o chamado com a solução.

@@ -1,1 +1,0 @@
-{% extends 'base.html' %}{% block body %}<section><h1>Entrar</h1>{% if erro %}<p class="erro">{{ erro }}</p>{% endif %}<form action="/login" method="post"><label>Email <input name="email" type="email" required></label><label>Senha <input name="senha" type="password" required></label><button>Entrar</button></form></section>{% endblock %}

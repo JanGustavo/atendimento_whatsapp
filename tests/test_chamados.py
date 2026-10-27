@@ -13,13 +13,12 @@ async def test_formulario_publico_exige_token_e_registra_chamado(ambiente, monke
     criado = await client.post('/api/computadores', data={'nome': 'PC Vendas', 'dono_id': '2', 'grupo': 'empresa'})
     assert criado.status_code == 200
     pc_id = criado.json()['id']
-    assert (await client.get('/chamado')).status_code == 403
-    assert (await client.post('/chamado', data={'token': 'errado', 'computador_id': pc_id, 'descricao': 'Sem rede'})).status_code == 403
-    pagina = await client.get('/chamado?token=token-de-instalacao')
-    assert pagina.status_code == 200 and 'PC Vendas' in pagina.text
-    resposta = await client.post('/chamado', data={'token': 'token-de-instalacao', 'computador_id': pc_id, 'descricao': 'Sem rede'})
-    assert resposta.status_code == 200 and 'Chamado #' in resposta.text
-    assert resposta.headers['Cache-Control'] == 'no-store'
+    assert (await client.get('/api/chamado/computadores')).status_code == 403
+    assert (await client.post('/api/chamado', data={'token': 'errado', 'computador_id': pc_id, 'descricao': 'Sem rede'})).status_code == 403
+    lista = await client.get('/api/chamado/computadores?token=token-de-instalacao')
+    assert lista.status_code == 200 and lista.json() == [{'id': pc_id, 'nome': 'PC Vendas'}]
+    resposta = await client.post('/api/chamado', data={'token': 'token-de-instalacao', 'computador_id': pc_id, 'descricao': 'Sem rede'})
+    assert resposta.status_code == 200 and resposta.json()['id'] > 0
     async with maker() as db:
         chamado = (await db.execute(select(Chamado))).scalar_one()
         assert (chamado.computador_id, chamado.descricao, chamado.status) == (pc_id, 'Sem rede', 'aberto')

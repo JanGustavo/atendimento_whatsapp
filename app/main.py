@@ -3,14 +3,16 @@ import logging
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.frontend import router as frontend_router
+from app.api.auth import router as auth_router
+from app.api.atendimentos import router as atendimentos_router
+from app.api.gestor import router as gestor_router
 from app.api.chamados import router as chamados_router
 from app.api.webhook import router as webhook_router
-from app.api.painel import router
+from app.api.frontend import router as frontend_router
 from app.api.simulador import router as simulador_router
 from app.core.database import async_session_maker
 from app.providers import provider_atual
@@ -48,6 +50,9 @@ if (web_dir / "assets").exists():
     app.mount("/assets", StaticFiles(directory=web_dir / "assets"), name="web-assets")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(frontend_router)
+app.include_router(auth_router)
+app.include_router(atendimentos_router)
+app.include_router(gestor_router)
 app.include_router(chamados_router)
 app.include_router(webhook_router)
 
@@ -74,10 +79,16 @@ async def favicon():
     return FileResponse(arquivo)
 
 
-app.include_router(router)
 app.include_router(simulador_router)
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+async def pagina_react(path: str, request: Request):
+    if request.method != "GET" or path.startswith(("api/", "webhook/", "static/", "assets/")):
+        raise HTTPException(status_code=404)
+    return await painel_react()

@@ -3,6 +3,7 @@ import os
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("JWT_SECRET", "segredo-exclusivo-dos-testes-m1")
 
@@ -13,8 +14,8 @@ from app.services.auth_service import get_password_hash
 
 
 @pytest.fixture
-async def ambiente(tmp_path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'teste.db'}")
+async def ambiente():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, expire_on_commit=False)

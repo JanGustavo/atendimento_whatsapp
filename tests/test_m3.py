@@ -27,9 +27,9 @@ async def test_vendedor_so_cancela_timer_apos_envio_confirmado(ambiente, monkeyp
         conversa.timer_prazo_em = datetime(2026, 10, 27, 12)
         await db.commit()
     falso = ProviderFalso(True)
-    monkeypatch.setattr('app.api.painel.provider_para_numero', lambda _: falso)
+    monkeypatch.setattr('app.api.atendimentos.provider_para_numero', lambda _: falso)
     await entrar(client, 'a@teste.local')
-    resposta = await client.post('/atendimentos/10/mensagens', data={'texto': 'Olá'})
+    resposta = await client.post('/api/atendimentos/10/mensagens', data={'texto': 'Olá'})
     assert resposta.status_code == 502
     async with maker() as db:
         conversa = await db.get(Conversa, 10)
@@ -37,14 +37,14 @@ async def test_vendedor_so_cancela_timer_apos_envio_confirmado(ambiente, monkeyp
         assert mensagem.envio_status == 'falhou'
         assert conversa.timer_prazo_em is not None and conversa.primeira_resposta_em is None
     falso.falhar = False
-    assert (await client.post('/atendimentos/10/mensagens', data={'texto': 'Olá'})).status_code == 303
+    assert (await client.post('/api/atendimentos/10/mensagens', data={'texto': 'Olá'})).status_code == 200
     async with maker() as db:
         conversa = await db.get(Conversa, 10)
         mensagens = (await db.execute(select(Mensagem).where(Mensagem.conversa_id == 10).order_by(Mensagem.id))).scalars().all()
         assert [m.envio_status for m in mensagens] == ['falhou', 'enviada']
         assert conversa.timer_prazo_em is None and conversa.primeira_resposta_em is not None
     assert falso.envios == [('551100001', 'Olá')]
-    assert (await client.get('/api/conversas/11')).status_code == 404
+    assert (await client.get('/api/atendimentos/11')).status_code == 404
 
 
 async def test_numero_encerrado_abre_nova_conversa_e_duplicata_nao_abre_outra(ambiente):
@@ -69,10 +69,10 @@ async def test_numero_encerrado_abre_nova_conversa_e_duplicata_nao_abre_outra(am
 async def test_transferencia_manual_registra_historico_e_avisa(ambiente, monkeypatch):
     client, maker = ambiente
     falso = ProviderFalso()
-    monkeypatch.setattr('app.api.painel.provider_para_numero', lambda _: falso)
+    monkeypatch.setattr('app.api.gestor.provider_para_numero', lambda _: falso)
     await entrar(client, 'gestor@teste.local')
     assert (await client.get('/api/gestor/whatsapp-status')).json() == {'status': 'simulado'}
-    assert (await client.post('/gestor/conversas/10/transferir', data={'usuario_id': '3'})).status_code == 303
+    assert (await client.post('/api/gestor/conversas/10/transferir', data={'usuario_id': '3'})).status_code == 200
     async with maker() as db:
         conversa = await db.get(Conversa, 10)
         historico = (await db.execute(select(Atribuicao).where(Atribuicao.conversa_id == 10))).scalars().all()
@@ -121,7 +121,7 @@ async def test_provider_evolution_http_e_regras_iguais(ambiente, monkeypatch):
 
     original = httpx.AsyncClient
     transporte = httpx.MockTransport(responder)
-    monkeypatch.setattr('app.providers.httpx.AsyncClient', lambda **kwargs: original(transport=transporte, **kwargs))
+    monkeypatch.setattr('app.providers.evolution.httpx.AsyncClient', lambda **kwargs: original(transport=transporte, **kwargs))
     provider = EvolutionProvider('http://evolution', 'chave', 'instancia')
     await provider.enviar_texto('+55 (11) 888-0000@s.whatsapp.net', 'Olá')
     assert await provider.status() == 'conectado'

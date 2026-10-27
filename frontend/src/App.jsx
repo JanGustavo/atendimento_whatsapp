@@ -6,6 +6,19 @@ const stageName = {
   menu_setor: 'Escolhendo setor', menu_vendedor: 'Escolhendo vendedor',
   atribuida: 'Em atendimento', aviso_transferencia: 'Aguardando resposta', encerrada: 'Encerrada',
 }
+const routeByPage = { inbox: '/atendimentos', manager: '/gestor', simulator: '/simulador', tickets: '/chamados' }
+const pageByRoute = Object.fromEntries(Object.entries(routeByPage).map(([page, route]) => [route, page]))
+
+function allowedPage(page, role) {
+  if (page === 'manager' || page === 'simulator') return role === 'gestor'
+  if (page === 'tickets') return role === 'gestor' || role === 'responsavel'
+  return true
+}
+
+function initialPage(role) {
+  const requested = pageByRoute[window.location.pathname]
+  return requested && allowedPage(requested, role) ? requested : role === 'gestor' ? 'manager' : 'inbox'
+}
 
 async function getJSON(path) {
   const response = await fetch(path, { credentials: 'same-origin' })
@@ -28,7 +41,7 @@ async function postForm(path, values) {
     try {
       const data = await response.json()
       if (data.detail) message = typeof data.detail === 'string' ? data.detail : message
-    } catch { /* Rotas antigas também podem retornar HTML. */ }
+    } catch { /* Erros de rede sem corpo JSON. */ }
     throw new Error(message)
   }
 }
@@ -238,19 +251,25 @@ export default function App() {
   const [notice, setNotice] = useState('')
 
   useEffect(() => {
-    getJSON('/api/me').then(user => { setMe(user); setPage(user.role === 'gestor' ? 'manager' : 'inbox') }).catch(() => setMe(null))
+    getJSON('/api/me').then(user => { setMe(user); setPage(initialPage(user.role)) }).catch(() => setMe(null))
   }, [])
+
+  useEffect(() => {
+    const voltar = () => { if (me) setPage(initialPage(me.role)) }
+    window.addEventListener('popstate', voltar)
+    return () => window.removeEventListener('popstate', voltar)
+  }, [me])
 
   const refreshConversations = useCallback(async () => {
     if (!me) return
     const query = new URLSearchParams()
     if (page === 'inbox' && search.trim()) query.set('q', search.trim())
-    try { setConversations(await getJSON(`/api/conversas?${query}`)) } catch (failure) { setError(failure.message) }
+    try { setConversations(await getJSON(`/api/atendimentos?${query}`)) } catch (failure) { setError(failure.message) }
   }, [me, page, search])
 
   const refreshDetail = useCallback(async () => {
     if (!selectedId || page !== 'inbox') return
-    try { setDetail(await getJSON(`/api/conversas/${selectedId}`)) }
+    try { setDetail(await getJSON(`/api/atendimentos/${selectedId}`)) }
     catch (failure) { setDetail(null); setError(failure.message) }
   }, [selectedId, page])
 
@@ -307,14 +326,15 @@ export default function App() {
 
   async function login(values) {
     setBusy(true); setError('')
-    try { await postForm('/login', values); const user = await getJSON('/api/me'); setMe(user); setPage(user.role === 'gestor' ? 'manager' : 'inbox') }
+    try { await postForm('/api/auth/login', values); const user = await getJSON('/api/me'); setMe(user); const next = initialPage(user.role); setPage(next); window.history.replaceState({}, '', routeByPage[next]) }
     catch { setError('Email ou senha inválidos.') }
     finally { setBusy(false) }
   }
 
   async function logout() {
-    try { await postForm('/sair', {}) } catch { /* O estado local também é limpo. */ }
+    try { await postForm('/api/auth/logout', {}) } catch { /* O estado local também é limpo. */ }
     setMe(null); setDetail(null); setConversations([]); setError('')
+    window.history.replaceState({}, '', '/login')
   }
 
   async function action(path, values, success = 'Alterações salvas.') {
@@ -328,7 +348,7 @@ export default function App() {
     finally { setBusy(false) }
   }
 
-  function navigate(next) { setPage(next); setError(''); setNotice('') }
+  function navigate(next) { setPage(next); window.history.pushState({}, '', routeByPage[next]); setError(''); setNotice('') }
   const headerTitle = useMemo(() => page === 'manager' ? 'Gestão' : page === 'simulator' ? 'Simulador' : page === 'tickets' ? 'Chamados' : 'Atendimentos', [page])
 
   if (me === undefined) return <div className="loading-screen"><Brand compact /><div className="loading-bar" /></div>
@@ -338,10 +358,10 @@ export default function App() {
     <aside className="sidebar"><div className="sidebar-top"><Brand /><div className="sidebar-caption">PAINEL DE CONTROLE</div><nav aria-label="Navegação principal"><button className={page === 'inbox' ? 'active' : ''} onClick={() => navigate('inbox')}><Icon name="inbox" />Atendimentos</button>{(me.role === 'gestor' || me.role === 'responsavel') && <button className={page === 'tickets' ? 'active' : ''} onClick={() => navigate('tickets')}><Icon name="ticket" />Chamados</button>}{me.role === 'gestor' && <><button className={page === 'manager' ? 'active' : ''} onClick={() => navigate('manager')}><Icon name="grid" />Visão do gestor</button><button className={page === 'simulator' ? 'active' : ''} onClick={() => navigate('simulator')}><Icon name="chat" />Simulador</button></>}</nav></div><div className="sidebar-bottom"><div className="sidebar-help"><span className="help-dot"/>Central FortGiro <small>Atendimento em operação</small></div><div className="sidebar-user"><span className="user-avatar">{initials(me.nome)}</span><span><strong>{me.nome}</strong><small>{roleName[me.role] || me.role}</small></span><button onClick={logout} title="Sair" aria-label="Sair"><Icon name="logout" /></button></div></div></aside>
     <main className="main-area"><header className="topbar"><div className="breadcrumb">FortGiro <span>/</span> <strong>{headerTitle}</strong></div><div className="topbar-right"><span className="topbar-date">{new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</span><span className="topbar-avatar">{initials(me.nome)}</span></div></header>
       {(error || notice) && <div className={`toast ${error ? 'toast-error' : 'toast-success'}`} role="status">{error || notice}<button onClick={() => { setError(''); setNotice('') }}>×</button></div>}
-      {page === 'inbox' && <Inbox me={me} conversations={conversations} selectedId={selectedId} onSelect={id => { setSelectedId(id); setDetail(null) }} detail={detail} search={search} setSearch={setSearch} busy={busy} onSend={(id, texto) => action(`/atendimentos/${id}/mensagens`, { texto }, 'Resposta enviada.')} onClose={id => action(`/atendimentos/${id}/encerrar`, {}, 'Conversa encerrada.').then(ok => { if (ok) { setSelectedId(null); setDetail(null) } })}/>}
-      {page === 'manager' && <Manager conversations={conversations} config={config} whatsappStatus={whatsappStatus} vendorFilter={vendorFilter} setVendorFilter={setVendorFilter} busy={busy} onOpen={id => { setSelectedId(id); setDetail(null); navigate('inbox') }} onTransfer={(id, usuario_id) => action(`/gestor/conversas/${id}/transferir`, { usuario_id }, 'Conversa transferida.')} onCreateUser={values => action('/gestor/usuarios', values, 'Usuário criado.')} onSaveUser={(id, values) => action(`/gestor/usuarios/${id}`, { nome: values.nome, email: values.email, role: values.role, ativo: values.ativo ? 'on' : '', online: values.online ? 'on' : '', senha: values.senha }, 'Usuário atualizado.')} onSaveSector={(id, values) => action(`/gestor/setores/${id}`, values, 'Setor atualizado.')}/>}
+      {page === 'inbox' && <Inbox me={me} conversations={conversations} selectedId={selectedId} onSelect={id => { setSelectedId(id); setDetail(null) }} detail={detail} search={search} setSearch={setSearch} busy={busy} onSend={(id, texto) => action(`/api/atendimentos/${id}/mensagens`, { texto }, 'Resposta enviada.')} onClose={id => action(`/api/atendimentos/${id}/encerrar`, {}, 'Conversa encerrada.').then(ok => { if (ok) { setSelectedId(null); setDetail(null) } })}/>}
+      {page === 'manager' && <Manager conversations={conversations} config={config} whatsappStatus={whatsappStatus} vendorFilter={vendorFilter} setVendorFilter={setVendorFilter} busy={busy} onOpen={id => { setSelectedId(id); setDetail(null); navigate('inbox') }} onTransfer={(id, usuario_id) => action(`/api/gestor/conversas/${id}/transferir`, { usuario_id }, 'Conversa transferida.')} onCreateUser={values => action('/api/gestor/usuarios', values, 'Usuário criado.')} onSaveUser={(id, values) => action(`/api/gestor/usuarios/${id}`, { nome: values.nome, email: values.email, role: values.role, ativo: values.ativo ? 'on' : '', online: values.online ? 'on' : '', senha: values.senha }, 'Usuário atualizado.')} onSaveSector={(id, values) => action(`/api/gestor/setores/${id}`, values, 'Setor atualizado.')}/>}
       {page === 'tickets' && <Chamados me={me} chamados={chamados} computadores={computadores} usuarios={config?.usuarios || []} busy={busy} onRequest={id => action(`/api/chamados/${id}/acessos`, {}, 'Acesso remoto simulado e registrado.')} onClose={(id, solucao) => action(`/api/chamados/${id}/fechar`, { solucao }, 'Chamado fechado com solução registrada.')} onCreateComputer={values => action('/api/computadores', values, 'Computador cadastrado.')} />}
-      {page === 'simulator' && <Simulator data={simData} client={client} setClient={setClient} busy={busy} onSend={(cliente, texto) => action('/simulador', { cliente, texto }, 'Mensagem enviada no simulador.')}/>}
+      {page === 'simulator' && <Simulator data={simData} client={client} setClient={setClient} busy={busy} onSend={(cliente, texto) => action('/api/simulador', { cliente, texto }, 'Mensagem enviada no simulador.')}/>}
     </main>
   </div>
 }

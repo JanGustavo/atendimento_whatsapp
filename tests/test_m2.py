@@ -138,7 +138,7 @@ async def test_primeira_resposta_humana_cancela_timer(ambiente, monkeypatch):
     await enviar(maker, "5511888005", "1", "hum-2")
     conversa, _, _ = await dados(maker, "5511888005")
     await entrar(client, "a@teste.local")
-    assert (await client.post(f"/atendimentos/{conversa.id}/mensagens", data={"texto": "Bom dia"})).status_code == 303
+    assert (await client.post(f"/api/atendimentos/{conversa.id}/mensagens", data={"texto": "Bom dia"})).status_code == 200
     instante[0] = BASE + timedelta(seconds=160)
     await timer(maker)
     conversa, mensagens, historico = await dados(maker, "5511888005")
@@ -152,24 +152,24 @@ async def test_primeira_resposta_humana_cancela_timer(ambiente, monkeypatch):
 async def test_simulador_usa_entrada_comum_e_setor_fixo(ambiente):
     client, maker = ambiente
     await entrar(client, "gestor@teste.local")
-    assert (await client.get("/simulador")).status_code == 200
-    assert (await client.post("/simulador", data={"cliente": "cliente2", "texto": "oi"})).status_code == 303
-    assert (await client.post("/simulador", data={"cliente": "cliente2", "texto": "2"})).status_code == 303
-    pagina = await client.get("/simulador?cliente=cliente2")
-    assert MENU_SETOR in pagina.text
+    assert (await client.get("/api/simulador")).status_code == 200
+    assert (await client.post("/api/simulador", data={"cliente": "cliente2", "texto": "oi"})).status_code == 200
+    assert (await client.post("/api/simulador", data={"cliente": "cliente2", "texto": "2"})).status_code == 200
+    pagina = await client.get("/api/simulador?cliente=cliente2")
+    assert MENU_SETOR in [m["texto"] for m in pagina.json()["mensagens"]]
     conversa, mensagens, historico = await dados(maker, "5511999000002")
     assert conversa.setor_id == 2 and conversa.atribuido_id == 4
     assert historico[0].motivo == "setor"
     assert "Responsável" in mensagens[-1].texto
     await entrar(client, "a@teste.local")
-    assert (await client.get("/simulador")).status_code == 403
+    assert (await client.get("/api/simulador")).status_code == 403
 
 
 async def test_gestor_configura_nome_e_responsavel_do_setor(ambiente):
     client, maker = ambiente
     await entrar(client, "gestor@teste.local")
-    resposta = await client.post("/gestor/setores/2", data={"nome": "Trocas", "responsavel_id": "6"})
-    assert resposta.status_code == 303
+    resposta = await client.post("/api/gestor/setores/2", data={"nome": "Trocas", "responsavel_id": "6"})
+    assert resposta.status_code == 200
     await enviar(maker, "5511888006", "inválido", "setor-1")
     conversa, mensagens, _ = await dados(maker, "5511888006")
     assert "2 - Trocas" in mensagens[-1].texto
@@ -183,8 +183,8 @@ async def test_gestor_configura_nome_e_responsavel_do_setor(ambiente):
 async def test_encerrar_conversa_grava_estado_e_respeita_isolamento(ambiente):
     client, maker = ambiente
     await entrar(client, "a@teste.local")
-    assert (await client.post("/atendimentos/11/encerrar")).status_code == 404
-    assert (await client.post("/atendimentos/10/encerrar")).status_code == 303
+    assert (await client.post("/api/atendimentos/11/encerrar")).status_code == 404
+    assert (await client.post("/api/atendimentos/10/encerrar")).status_code == 200
     async with maker() as db:
         conversa = await db.get(Conversa, 10)
         assert conversa.etapa == "encerrada"

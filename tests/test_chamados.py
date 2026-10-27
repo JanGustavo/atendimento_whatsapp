@@ -40,6 +40,8 @@ async def test_pc_do_dono_bloqueado_no_servidor_e_acesso_auditado(ambiente, monk
         empresa_chamado, dono_chamado = [item.id for item in chamados]
 
     assert (await client.post(f'/api/chamados/{dono_chamado}/acessos')).status_code == 403
+
+
     async with maker() as db:
         assert (await db.execute(select(AcessoRemoto))).scalars().all() == []
 
@@ -66,3 +68,24 @@ async def test_pc_do_dono_bloqueado_no_servidor_e_acesso_auditado(ambiente, monk
     await entrar(client, 'a@teste.local')
     assert (await client.get('/api/chamados')).status_code == 403
     assert (await client.post(f'/api/chamados/{dono_chamado}/acessos')).status_code == 403
+
+
+async def test_vendedor_abre_chamado_do_proprio_pc_sem_acesso_a_gestao(ambiente):
+    client, maker = ambiente
+    await entrar(client, 'gestor@teste.local')
+    pc_a = (await client.post('/api/computadores', data={'nome': 'PC do A', 'dono_id': '2', 'grupo': 'empresa'})).json()['id']
+    pc_b = (await client.post('/api/computadores', data={'nome': 'PC do B', 'dono_id': '3', 'grupo': 'empresa'})).json()['id']
+    await entrar(client, 'a@teste.local')
+    assert (await client.get('/api/meus-chamados/computadores')).json() == [{'id': pc_a, 'nome': 'PC do A'}]
+    assert (await client.post('/api/meus-chamados', data={'computador_id': pc_b, 'descricao': 'Problema em outro PC'})).status_code == 404
+    aberto = await client.post('/api/meus-chamados', data={'computador_id': pc_a, 'descricao': 'Não consigo acessar o sistema'})
+    assert aberto.status_code == 200
+    chamado_id = aberto.json()['id']
+    assert [item['id'] for item in (await client.get('/api/meus-chamados')).json()] == [chamado_id]
+    assert (await client.get('/api/chamados')).status_code == 403
+    assert (await client.post(f'/api/chamados/{chamado_id}/acessos')).status_code == 403
+    assert (await client.post(f'/api/chamados/{chamado_id}/fechar', data={'solucao': 'teste'})).status_code == 403
+    async with maker() as db:
+        assert (await db.get(Chamado, chamado_id)).computador_id == pc_a
+    await entrar(client, 'r@teste.local')
+    assert chamado_id in [item['id'] for item in (await client.get('/api/chamados')).json()]

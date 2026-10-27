@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import Chamados from './Chamados.jsx'
+import Chamados, { ChamadosVendedor } from './Chamados.jsx'
 
 const roleName = { gestor: 'Gestor', vendedor: 'Vendedor', responsavel: 'Responsável' }
 const stageName = {
@@ -11,7 +11,7 @@ const pageByRoute = Object.fromEntries(Object.entries(routeByPage).map(([page, r
 
 function allowedPage(page, role) {
   if (page === 'manager' || page === 'simulator') return role === 'gestor'
-  if (page === 'tickets') return role === 'gestor' || role === 'responsavel'
+  if (page === 'tickets') return true
   return true
 }
 
@@ -279,9 +279,10 @@ export default function App() {
   }, [me])
 
   const refreshTickets = useCallback(async () => {
-    if (me?.role !== 'gestor' && me?.role !== 'responsavel') return
+    if (!me) return
     try {
-      const [lista, pcs] = await Promise.all([getJSON('/api/chamados'), getJSON('/api/computadores')])
+      const meus = me.role === 'vendedor'
+      const [lista, pcs] = await Promise.all([getJSON(meus ? '/api/meus-chamados' : '/api/chamados'), getJSON(meus ? '/api/meus-chamados/computadores' : '/api/computadores')])
       setChamados(lista); setComputadores(pcs)
     } catch (failure) { setError(failure.message) }
   }, [me])
@@ -355,12 +356,12 @@ export default function App() {
   if (me === null) return <Login onLogin={login} busy={busy} error={error}/>
 
   return <div className="app-shell">
-    <aside className="sidebar"><div className="sidebar-top"><Brand /><div className="sidebar-caption">PAINEL DE CONTROLE</div><nav aria-label="Navegação principal"><button className={page === 'inbox' ? 'active' : ''} onClick={() => navigate('inbox')}><Icon name="inbox" />Atendimentos</button>{(me.role === 'gestor' || me.role === 'responsavel') && <button className={page === 'tickets' ? 'active' : ''} onClick={() => navigate('tickets')}><Icon name="ticket" />Chamados</button>}{me.role === 'gestor' && <><button className={page === 'manager' ? 'active' : ''} onClick={() => navigate('manager')}><Icon name="grid" />Visão do gestor</button><button className={page === 'simulator' ? 'active' : ''} onClick={() => navigate('simulator')}><Icon name="chat" />Simulador</button></>}</nav></div><div className="sidebar-bottom"><div className="sidebar-help"><span className="help-dot"/>Central FortGiro <small>Atendimento em operação</small></div><div className="sidebar-user"><span className="user-avatar">{initials(me.nome)}</span><span><strong>{me.nome}</strong><small>{roleName[me.role] || me.role}</small></span><button onClick={logout} title="Sair" aria-label="Sair"><Icon name="logout" /></button></div></div></aside>
+    <aside className="sidebar"><div className="sidebar-top"><Brand /><div className="sidebar-caption">PAINEL DE CONTROLE</div><nav aria-label="Navegação principal"><button className={page === 'inbox' ? 'active' : ''} onClick={() => navigate('inbox')}><Icon name="inbox" />Atendimentos</button><button className={page === 'tickets' ? 'active' : ''} onClick={() => navigate('tickets')}><Icon name="ticket" />Chamados</button>{me.role === 'gestor' && <><button className={page === 'manager' ? 'active' : ''} onClick={() => navigate('manager')}><Icon name="grid" />Visão do gestor</button><button className={page === 'simulator' ? 'active' : ''} onClick={() => navigate('simulator')}><Icon name="chat" />Simulador</button></>}</nav></div><div className="sidebar-bottom"><div className="sidebar-help"><span className="help-dot"/>Central FortGiro <small>Atendimento em operação</small></div><div className="sidebar-user"><span className="user-avatar">{initials(me.nome)}</span><span><strong>{me.nome}</strong><small>{roleName[me.role] || me.role}</small></span><button onClick={logout} title="Sair" aria-label="Sair"><Icon name="logout" /></button></div></div></aside>
     <main className="main-area"><header className="topbar"><div className="breadcrumb">FortGiro <span>/</span> <strong>{headerTitle}</strong></div><div className="topbar-right"><span className="topbar-date">{new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</span><span className="topbar-avatar">{initials(me.nome)}</span></div></header>
       {(error || notice) && <div className={`toast ${error ? 'toast-error' : 'toast-success'}`} role="status">{error || notice}<button onClick={() => { setError(''); setNotice('') }}>×</button></div>}
       {page === 'inbox' && <Inbox me={me} conversations={conversations} selectedId={selectedId} onSelect={id => { setSelectedId(id); setDetail(null) }} detail={detail} search={search} setSearch={setSearch} busy={busy} onSend={(id, texto) => action(`/api/atendimentos/${id}/mensagens`, { texto }, 'Resposta enviada.')} onClose={id => action(`/api/atendimentos/${id}/encerrar`, {}, 'Conversa encerrada.').then(ok => { if (ok) { setSelectedId(null); setDetail(null) } })}/>}
       {page === 'manager' && <Manager conversations={conversations} config={config} whatsappStatus={whatsappStatus} vendorFilter={vendorFilter} setVendorFilter={setVendorFilter} busy={busy} onOpen={id => { setSelectedId(id); setDetail(null); navigate('inbox') }} onTransfer={(id, usuario_id) => action(`/api/gestor/conversas/${id}/transferir`, { usuario_id }, 'Conversa transferida.')} onCreateUser={values => action('/api/gestor/usuarios', values, 'Usuário criado.')} onSaveUser={(id, values) => action(`/api/gestor/usuarios/${id}`, { nome: values.nome, email: values.email, role: values.role, ativo: values.ativo ? 'on' : '', online: values.online ? 'on' : '', senha: values.senha }, 'Usuário atualizado.')} onSaveSector={(id, values) => action(`/api/gestor/setores/${id}`, values, 'Setor atualizado.')}/>}
-      {page === 'tickets' && <Chamados me={me} chamados={chamados} computadores={computadores} usuarios={config?.usuarios || []} busy={busy} onRequest={id => action(`/api/chamados/${id}/acessos`, {}, 'Acesso remoto simulado e registrado.')} onClose={(id, solucao) => action(`/api/chamados/${id}/fechar`, { solucao }, 'Chamado fechado com solução registrada.')} onCreateComputer={values => action('/api/computadores', values, 'Computador cadastrado.')} />}
+      {page === 'tickets' && (me.role === 'vendedor' ? <ChamadosVendedor chamados={chamados} computadores={computadores} busy={busy} onCreate={values => action('/api/meus-chamados', values, 'Chamado aberto. A equipe de suporte já pode vê-lo.')} /> : <Chamados me={me} chamados={chamados} computadores={computadores} usuarios={config?.usuarios || []} busy={busy} onRequest={id => action(`/api/chamados/${id}/acessos`, {}, 'Acesso remoto simulado e registrado.')} onClose={(id, solucao) => action(`/api/chamados/${id}/fechar`, { solucao }, 'Chamado fechado com solução registrada.')} onCreateComputer={values => action('/api/computadores', values, 'Computador cadastrado.')} />)}
       {page === 'simulator' && <Simulator data={simData} client={client} setClient={setClient} busy={busy} onSend={(cliente, texto) => action('/api/simulador', { cliente, texto }, 'Mensagem enviada no simulador.')}/>}
     </main>
   </div>

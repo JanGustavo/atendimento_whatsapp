@@ -30,6 +30,12 @@ def suporte(user: UsuarioAtual = Depends(get_current_user)) -> UsuarioAtual:
     return user
 
 
+def vendedor(user: UsuarioAtual = Depends(get_current_user)) -> UsuarioAtual:
+    if user.role != "vendedor":
+        raise HTTPException(status_code=403, detail="Apenas vendedor")
+    return user
+
+
 @router.get("/api/chamado/computadores")
 async def computadores_publicos(response: Response, token: str = "", db: AsyncSession = Depends(get_db)):
     validar_token(token)
@@ -52,6 +58,43 @@ async def abrir_chamado(request: Request, response: Response, db: AsyncSession =
     db.add(chamado)
     await db.commit()
     response.headers["Cache-Control"] = "no-store"
+    return {"id": chamado.id, "status": chamado.status}
+
+
+@router.get("/api/meus-chamados/computadores")
+async def meus_computadores(db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(vendedor)):
+    computadores = (await db.execute(select(Computador).where(
+        Computador.dono_id == user.user_id, Computador.grupo == "empresa",
+    ).order_by(Computador.nome))).scalars().all()
+    return [{"id": item.id, "nome": item.nome} for item in computadores]
+
+
+@router.get("/api/meus-chamados")
+async def meus_chamados(db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(vendedor)):
+    chamados = (await db.execute(select(Chamado).join(Computador).where(
+        Computador.dono_id == user.user_id, Computador.grupo == "empresa",
+    ).options(selectinload(Chamado.computador)).order_by(Chamado.id.desc()))).scalars().all()
+    return [{"id": item.id, "computador_nome": item.computador.nome, "descricao": item.descricao,
+             "status": item.status, "criado_em": item.criado_em.isoformat(), "solucao": item.solucao}
+            for item in chamados]
+
+
+@router.post("/api/meus-chamados")
+async def abrir_meu_chamado(request: Request, db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(vendedor)):
+    dados = await form(request)
+    computador_id = dados.get("computador_id", "")
+    descricao = dados.get("descricao", "").strip()
+    if not computador_id.isdecimal() or not 3 <= len(descricao) <= 4000:
+        raise HTTPException(status_code=422, detail="Computador ou descrição inválidos")
+    computador = (await db.execute(select(Computador).where(
+        Computador.id == int(computador_id), Computador.dono_id == user.user_id,
+        Computador.grupo == "empresa",
+    ))).scalar_one_or_none()
+    if computador is None:
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
+    chamado = Chamado(computador_id=computador.id, descricao=descricao, status="aberto", criado_em=agora())
+    db.add(chamado)
+    await db.commit()
     return {"id": chamado.id, "status": chamado.status}
 
 

@@ -27,6 +27,30 @@ function CartaoChamado({ chamado, onRequest, onClose, busy }) {
   </article>
 }
 
+export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
+  const [computadorId, setComputadorId] = useState('')
+  const [descricao, setDescricao] = useState('')
+  const escolhido = computadorId || String(computadores[0]?.id || '')
+  return <div className="tickets-page">
+    <div className="page-intro"><div><div className="eyebrow">SUPORTE INTERNO</div><h1>Meus chamados</h1><p>Conte o que aconteceu no seu computador para a equipe de suporte.</p></div></div>
+    <div className="tickets-layout"><section className="tickets-list">
+      <div className="tickets-section-title"><h2>Meus pedidos</h2><p>Você acompanha aqui os chamados do seu computador.</p></div>
+      {chamados.map(chamado => <article className="ticket-card" key={chamado.id}>
+        <div className="ticket-card-top"><div><span className="eyebrow">CHAMADO #{chamado.id}</span><h3>{chamado.computador_nome}</h3></div><span className={`ticket-status ticket-status-${chamado.status}`}>{nomes[chamado.status]}</span></div>
+        <p className="ticket-description">{chamado.descricao}</p><div className="ticket-meta">Aberto em {dataHora(chamado.criado_em)}</div>
+        {chamado.solucao && <div className="ticket-solution"><strong>Solução registrada</strong><p>{chamado.solucao}</p></div>}
+      </article>)}
+      {!chamados.length && <div className="surface tickets-empty">Nenhum chamado registrado ainda.</div>}
+    </section><aside className="tickets-side"><section className="surface tickets-side-card"><div className="eyebrow">NOVO PEDIDO</div><h3>Abrir chamado</h3>
+      {!computadores.length ? <p className="muted">Nenhum computador vinculado à sua conta. Peça ao gestor para cadastrá-lo.</p> : <form className="ticket-pc-form" onSubmit={async event => { event.preventDefault(); if (await onCreate({ computador_id: escolhido, descricao: descricao.trim() })) setDescricao('') }}>
+        <label>Computador<select value={escolhido} onChange={event => setComputadorId(event.target.value)} required>{computadores.map(pc => <option key={pc.id} value={pc.id}>{pc.nome}</option>)}</select></label>
+        <label>Descreva o problema<textarea value={descricao} onChange={event => setDescricao(event.target.value)} minLength="3" maxLength="4000" rows="5" placeholder="Ex.: não consigo acessar o sistema" required /></label>
+        <button className="button button-primary" disabled={busy || descricao.trim().length < 3}>Enviar chamado</button>
+      </form>}
+    </section></aside></div>
+  </div>
+}
+
 export default function Chamados({ me, chamados, computadores, usuarios, busy, onRequest, onClose, onCreateComputer }) {
   const [novo, setNovo] = useState({ nome: '', dono_id: '', grupo: 'empresa', mesh_node_id: '' })
   const abertos = chamados.filter(chamado => chamado.status !== 'fechado').length

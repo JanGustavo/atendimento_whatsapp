@@ -11,6 +11,8 @@ from app.core.database import get_session_maker
 from app.main import app
 from app.models import Conversa, Mensagem
 from app.providers import MetaProvider, MensagemEntrada, simulador_provider
+from app.providers.meta import MetaTokenExpirado
+import pytest
 from app.services.atendimento import receber_mensagem
 
 
@@ -39,6 +41,20 @@ async def test_meta_recoloca_nono_digito_no_destino_brasileiro(monkeypatch):
     assert await provider.enviar_texto("558398442632", "Olá") == "wamid.saida"
     await provider.enviar_texto("551132341234", "Olá")
     assert enviados == ["5583998442632", "551132341234"]
+
+
+async def test_meta_identifica_token_expirado_sem_expor_credencial(monkeypatch):
+    def responder(_request):
+        return httpx.Response(401, json={"error": {"code": 190, "error_subcode": 463, "type": "OAuthException"}})
+
+    cliente_original = httpx.AsyncClient
+    transporte = httpx.MockTransport(responder)
+    monkeypatch.setattr("app.providers.meta.httpx.AsyncClient", lambda **kwargs: cliente_original(transport=transporte, **kwargs))
+    provider = MetaProvider("v25.0", "123", "segredo-que-nao-deve-aparecer")
+    assert await provider.status() == "token expirado"
+    with pytest.raises(MetaTokenExpirado, match="expirou") as erro:
+        await provider.enviar_texto("55118880000", "Olá")
+    assert "segredo-que-nao-deve-aparecer" not in str(erro.value)
 
 
 async def test_meta_envia_texto_consulta_status_e_mantem_regras(ambiente, monkeypatch):

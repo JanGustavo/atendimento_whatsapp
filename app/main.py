@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.auth import router as auth_router
@@ -17,6 +17,7 @@ from app.api.simulador import router as simulador_router
 from app.api.interno import router as interno_router
 from app.api.eventos import router as eventos_router
 from app.core.database import async_session_maker
+from app.core.config import get_settings
 from app.providers import provider_atual
 from app.services.atendimento import verificar_timers
 
@@ -45,6 +46,16 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Atendimento WhatsApp — Alpha", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def exigir_origem_do_painel_https(request: Request, call_next):
+    host = get_settings().panel_https_host
+    if (host and request.url.hostname == host and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            and request.url.path.startswith("/api/")
+            and request.headers.get("origin") != f"https://{host}"):
+        return JSONResponse({"detail": "Origem inválida"}, status_code=403)
+    return await call_next(request)
 web_dir = Path(__file__).resolve().parent / "web"
 if not web_dir.exists():
     web_dir = Path(__file__).resolve().parents[1] / "frontend" / "dist"

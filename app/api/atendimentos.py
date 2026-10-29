@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.utils import now
 from app.models import Atribuicao, Conversa, LeituraConversa, Mensagem, Setor, Usuario
 from app.providers import provider_para_numero
+from app.providers.meta import MetaTokenExpirado
 
 router = APIRouter(prefix="/api/atendimentos")
 
@@ -81,10 +82,64 @@ async def enviar(
     texto_cliente = f"*{papel} {user.nome}*\n{texto}"
     try:
         mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(conversa.numero, texto_cliente)
+    except MetaTokenExpirado:
+        mensagem.envio_status = "falhou"
+        await db.commit()
+        raise HTTPException(status_code=502, detail="O token da Meta expirou. Avise o gestor para atualizar a conexão antes de enviar novamente.")
     except Exception:
         mensagem.envio_status = "falhou"
         await db.commit()
         raise HTTPException(status_code=502, detail="Envio ao WhatsApp falhou. A mensagem ficou marcada como falhou; tente enviá-la novamente.")
+    mensagem.envio_status = "enviada"
+    if user.role == "colaborador":
+        await db.execute(update(Conversa).where(*condicoes).values(
+            primeira_resposta_em=func.coalesce(Conversa.primeira_resposta_em, now()),
+            timer_prazo_em=None, etapa="atribuida"))
+    await db.commit()
+    return {"id": mensagem.id, "envio_status": mensagem.envio_status}
+
+
+@router.post("/{conversa_id}/mensagens/{mensagem_id}/reenviar")
+async def reenviar(
+    conversa_id: int,
+    mensagem_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    conversa = await conversa_visivel(db, conversa_id, user)
+    if conversa.status != "aberta":
+        raise HTTPException(status_code=409, detail="Conversa encerrada")
+    mensagem = (await db.execute(select(Mensagem).where(
+        Mensagem.id == mensagem_id, Mensagem.conversa_id == conversa_id,
+        Mensagem.origem == "humano", Mensagem.autor_id == user.user_id,
+    ))).scalar_one_or_none()
+    if mensagem is None:
+        raise HTTPException(status_code=404, detail="Mensagem não encontrada")
+    condicoes = [Conversa.id == conversa_id, Conversa.status == "aberta"]
+    if user.role != "gestor":
+        condicoes.append(Conversa.atribuido_id == user.user_id)
+    bloqueio = await db.execute(update(Conversa).where(*condicoes).values(status="aberta"))
+    if bloqueio.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Conversa não encontrada")
+    reserva = await db.execute(update(Mensagem).where(
+        Mensagem.id == mensagem_id, Mensagem.envio_status == "falhou",
+    ).values(envio_status="pendente"))
+    if reserva.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Esta mensagem não está pendente de reenvio")
+    papel = {"colaborador": "Atendente", "supervisor": "Supervisor", "gestor": "Gestor"}[user.role]
+    try:
+        mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(
+            conversa.numero, f"*{papel} {user.nome}*\n{mensagem.texto}")
+    except MetaTokenExpirado:
+        mensagem.envio_status = "falhou"
+        await db.commit()
+        raise HTTPException(status_code=502, detail="O token da Meta expirou. Avise o gestor para atualizar a conexão antes de reenviar.")
+    except Exception:
+        mensagem.envio_status = "falhou"
+        await db.commit()
+        raise HTTPException(status_code=502, detail="Reenvio ao WhatsApp falhou. A mensagem continua marcada como falhou.")
     mensagem.envio_status = "enviada"
     if user.role == "colaborador":
         await db.execute(update(Conversa).where(*condicoes).values(

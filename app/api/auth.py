@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api._shared import form
 from app.api.deps import UsuarioAtual, get_current_user
 from app.core.database import get_db
+from app.core.config import get_settings
 from app.models import Usuario
 from app.services.auth_service import create_access_token, get_password_hash, verify_password
 
@@ -26,7 +27,7 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
         create_access_token(usuario.id, usuario.role),
         httponly=True,
         samesite="lax",
-        secure=request.url.scheme == "https",
+        secure=request.url.scheme == "https" or request.url.hostname == get_settings().panel_https_host,
     )
     return resposta
 

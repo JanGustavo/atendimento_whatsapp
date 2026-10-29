@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     aviso_transferencia_texto: str = "Seu atendimento foi transferido para {nome}."
     app_log_level: str = "INFO"
     chamado_install_token: str = ""
+    panel_https_host: str = ""
     timer_espera_segundos: int = 90
     timer_aviso_segundos: int = 60
     timer_maximo_segundos: int = 210

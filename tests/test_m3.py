@@ -31,16 +31,21 @@ async def test_vendedor_so_cancela_timer_apos_envio_confirmado(ambiente, monkeyp
     async with maker() as db:
         conversa = await db.get(Conversa, 10)
         mensagem = (await db.execute(select(Mensagem).where(Mensagem.conversa_id == 10))).scalar_one()
+        mensagem_id = mensagem.id
         assert mensagem.envio_status == 'falhou'
         assert conversa.timer_prazo_em is not None and conversa.primeira_resposta_em is None
     falso.falhar = False
-    assert (await client.post('/api/atendimentos/10/mensagens', data={'texto': 'Olá'})).status_code == 200
+    rota = f'/api/atendimentos/10/mensagens/{mensagem_id}/reenviar'
+    assert (await client.post(rota)).status_code == 200
+    assert (await client.post(rota)).status_code == 409
     async with maker() as db:
         conversa = await db.get(Conversa, 10)
         mensagens = (await db.execute(select(Mensagem).where(Mensagem.conversa_id == 10).order_by(Mensagem.id))).scalars().all()
-        assert [m.envio_status for m in mensagens] == ['falhou', 'enviada']
+        assert [(m.id, m.envio_status) for m in mensagens] == [(mensagem_id, 'enviada')]
         assert conversa.timer_prazo_em is None and conversa.primeira_resposta_em is not None
     assert falso.envios == [('551100001', '*Atendente Vendedor A*\nOlá')]
+    await entrar(client, 'b@teste.local')
+    assert (await client.post(rota)).status_code == 404
 
 
 async def test_atendente_transfere_com_isolamento_e_historico(ambiente, monkeypatch):

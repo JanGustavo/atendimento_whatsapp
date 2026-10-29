@@ -4,6 +4,18 @@ import httpx
 from app.providers.base import MensagemEntrada
 
 
+class MetaTokenExpirado(Exception):
+    """A Graph API informou que o token de acesso expirou."""
+
+
+def _token_expirado(resposta: httpx.Response) -> bool:
+    try:
+        erro = resposta.json().get("error", {})
+        return erro.get("code") == 190 and erro.get("error_subcode") == 463
+    except (ValueError, AttributeError):
+        return False
+
+
 class MetaProvider:
     def __init__(self, graph_version: str, phone_number_id: str, access_token: str):
         self.graph_version = graph_version
@@ -31,6 +43,8 @@ class MetaProvider:
                 json={"messaging_product": "whatsapp", "recipient_type": "individual",
                       "to": numero, "type": "text", "text": {"body": texto}},
             )
+            if _token_expirado(resposta):
+                raise MetaTokenExpirado("Token de acesso da Meta expirou")
             resposta.raise_for_status()
             dados = resposta.json()
             identidade = (dados.get("messages") or [{}])[0].get("id")
@@ -104,6 +118,8 @@ class MetaProvider:
         try:
             async with httpx.AsyncClient(timeout=3) as client:
                 resposta = await client.get(self._url, headers={"Authorization": f"Bearer {self.access_token}"})
+                if _token_expirado(resposta):
+                    return "token expirado"
                 resposta.raise_for_status()
             return "conectado"
         except (httpx.HTTPError, ValueError):

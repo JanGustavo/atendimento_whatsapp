@@ -6,10 +6,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("JWT_SECRET", "segredo-exclusivo-dos-testes-m1")
+os.environ["WHATSAPP_PROVIDER"] = "simulador"
+os.environ["EXPEDIENTE_INICIO"] = "00:00"
+os.environ["EXPEDIENTE_FIM"] = "23:59"
+os.environ["TIMER_ESPERA_SEGUNDOS"] = "90"
+os.environ["TIMER_AVISO_SEGUNDOS"] = "60"
+os.environ["TIMER_MAXIMO_SEGUNDOS"] = "210"
 
 from app.core.database import Base, get_db
 from app.main import app
-from app.models import Conversa, Setor, Usuario
+from app.models import Conversa, Setor, SetorInterno, SimuladorEstado, Usuario
 from app.services.auth_service import get_password_hash
 
 
@@ -26,13 +32,19 @@ async def ambiente():
 
     app.dependency_overrides[get_db] = database_override
     async with maker() as db:
+        db.add(SimuladorEstado(id=1, ativo=True))
         db.add_all([
-            Usuario(id=1, nome="Gestor", email="gestor@teste.local", senha_hash=get_password_hash("senha12345"), role="gestor", ativo=True, online=True),
-            Usuario(id=2, nome="Vendedor A", email="a@teste.local", senha_hash=get_password_hash("senha12345"), role="vendedor", ativo=True, online=True),
-            Usuario(id=3, nome="Vendedor B", email="b@teste.local", senha_hash=get_password_hash("senha12345"), role="vendedor", ativo=True, online=True),
-            Usuario(id=4, nome="Responsável", email="r@teste.local", senha_hash=get_password_hash("senha12345"), role="responsavel", ativo=True, online=True),
-            Usuario(id=5, nome="Vendedor C", email="c@teste.local", senha_hash=get_password_hash("senha12345"), role="vendedor", ativo=True, online=True),
-            Usuario(id=6, nome="Responsável 2", email="r2@teste.local", senha_hash=get_password_hash("senha12345"), role="responsavel", ativo=True, online=True),
+            SetorInterno(id=1, nome="Vendas"), SetorInterno(id=2, nome="Estoque"),
+            SetorInterno(id=3, nome="Garantia"), SetorInterno(id=4, nome="Administração"),
+        ])
+        await db.flush()
+        db.add_all([
+            Usuario(id=1, nome="Gestor", email="gestor@teste.local", senha_hash=get_password_hash("senha12345"), role="gestor", ativo=True, online=True, setor_interno_id=4),
+            Usuario(id=2, nome="Vendedor A", email="a@teste.local", senha_hash=get_password_hash("senha12345"), role="colaborador", ativo=True, online=True, setor_interno_id=1),
+            Usuario(id=3, nome="Vendedor B", email="b@teste.local", senha_hash=get_password_hash("senha12345"), role="colaborador", ativo=True, online=True, setor_interno_id=1),
+            Usuario(id=4, nome="Responsável", email="r@teste.local", senha_hash=get_password_hash("senha12345"), role="supervisor", ativo=True, online=True, setor_interno_id=2),
+            Usuario(id=5, nome="Vendedor C", email="c@teste.local", senha_hash=get_password_hash("senha12345"), role="colaborador", ativo=True, online=True, setor_interno_id=1),
+            Usuario(id=6, nome="Responsável 2", email="r2@teste.local", senha_hash=get_password_hash("senha12345"), role="supervisor", ativo=True, online=True, setor_interno_id=3),
         ])
         db.add_all([
             Setor(id=1, nome="Vendas/Compra", ordem=1),

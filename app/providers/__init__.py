@@ -5,7 +5,7 @@ mantendo compatibilidade total de imports.
 """
 from app.providers.base import MensagemEntrada, WhatsAppProvider
 from app.providers.simulador import CLIENTES, SimuladorProvider, simulador_provider
-from app.providers.evolution import EvolutionProvider
+from app.providers.meta import MetaProvider
 from app.providers._factory import provider_atual, provider_para_numero
 
 __all__ = [
@@ -14,7 +14,7 @@ __all__ = [
     "CLIENTES",
     "SimuladorProvider",
     "simulador_provider",
-    "EvolutionProvider",
+    "MetaProvider",
     "provider_atual",
     "provider_para_numero",
 ]

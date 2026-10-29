@@ -1,7 +1,7 @@
 """Factory: escolhe o provider ativo com base nas configurações."""
 from app.core.config import get_settings
 from app.providers.base import WhatsAppProvider
-from app.providers.evolution import EvolutionProvider
+from app.providers.meta import MetaProvider
 from app.providers.simulador import CLIENTES, simulador_provider
 
 
@@ -9,7 +9,7 @@ def provider_atual() -> WhatsAppProvider:
     config = get_settings()
     if config.whatsapp_provider == "simulador":
         return simulador_provider
-    return EvolutionProvider(config.evolution_base_url, config.evolution_api_key, config.evolution_instancia)
+    return MetaProvider(config.meta_graph_version, config.meta_phone_number_id, config.meta_access_token)
 
 
 def provider_para_numero(numero: str) -> WhatsAppProvider:

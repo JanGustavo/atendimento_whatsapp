@@ -10,7 +10,7 @@ CLIENTES: dict[str, tuple[str, str]] = {
 
 
 class SimuladorProvider:
-    async def enviar_texto(self, numero: str, texto: str) -> None:
+    async def enviar_texto(self, numero: str, texto: str) -> str | None:
         return None
 
     def parse_webhook(self, payload: dict) -> MensagemEntrada | None:

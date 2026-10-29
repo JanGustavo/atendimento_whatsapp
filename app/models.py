@@ -9,7 +9,7 @@ from app.core.utils import now as agora  # agora() → now() centralizado
 
 class Usuario(Base):
     __tablename__ = "usuarios"
-    __table_args__ = (CheckConstraint("role IN ('vendedor','responsavel','gestor')"),)
+    __table_args__ = (CheckConstraint("role IN ('colaborador','supervisor','gestor')"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(120))
@@ -19,6 +19,7 @@ class Usuario(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     online: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     ultima_atribuicao_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    setor_interno_id: Mapped[int | None] = mapped_column(Integer)
 
 
 class Setor(Base):
@@ -28,6 +29,27 @@ class Setor(Base):
     ordem: Mapped[int] = mapped_column(Integer, unique=True)
     responsavel_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
     responsavel: Mapped[Usuario | None] = relationship()
+
+
+class SetorInterno(Base):
+    __tablename__ = "setores_internos"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome: Mapped[str] = mapped_column(String(80), unique=True)
+
+
+class MensagemInterna(Base):
+    __tablename__ = "mensagens_internas"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    remetente_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    destinatario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    texto: Mapped[str] = mapped_column(Text, nullable=False)
+    criada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+
+class SimuladorEstado(Base):
+    __tablename__ = "simulador_estado"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class Conversa(Base):
@@ -45,6 +67,7 @@ class Conversa(Base):
     timer_prazo_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timer_aviso_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timer_extensoes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tentativas_timer: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     setor: Mapped[Setor | None] = relationship()
     atribuido: Mapped[Usuario | None] = relationship()
 
@@ -58,7 +81,18 @@ class Mensagem(Base):
     texto: Mapped[str] = mapped_column(Text)
     provider_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     envio_status: Mapped[str | None] = mapped_column(String(20))
+    lida_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     criada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+
+class LeituraConversa(Base):
+    __tablename__ = "leituras_conversas"
+    __table_args__ = (Index("uq_leitura_conversa_usuario", "conversa_id", "usuario_id", unique=True),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversa_id: Mapped[int] = mapped_column(ForeignKey("conversas.id"), index=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    ultima_mensagem_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    lida_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Atribuicao(Base):

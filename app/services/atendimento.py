@@ -1,6 +1,7 @@
 """Aplica as transições do chatbot e executa os prazos persistidos."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -11,6 +12,14 @@ from app.core.utils import now
 from app.models import Atribuicao, Conversa, Mensagem, Setor, Usuario
 from app.providers import MensagemEntrada, WhatsAppProvider
 from app.services.chatbot import MENU_SETOR, processar_mensagem
+
+
+def em_expediente(instante: datetime) -> bool:
+    config = get_settings()
+    horario = instante.replace(tzinfo=UTC).astimezone(ZoneInfo(config.expediente_fuso)).time()
+    inicio = time.fromisoformat(config.expediente_inicio)
+    fim = time.fromisoformat(config.expediente_fim)
+    return inicio <= horario < fim if inicio < fim else horario >= inicio or horario < fim
 
 
 def menu_vendedores(vendedores: list[Usuario]) -> str:
@@ -26,11 +35,13 @@ async def menu_setores(db: AsyncSession) -> str:
 
 
 async def vendedores_ativos(db: AsyncSession) -> list[Usuario]:
-    return list((await db.execute(select(Usuario).where(Usuario.role == "vendedor", Usuario.ativo.is_(True)).order_by(Usuario.id))).scalars())
+    return list((await db.execute(select(Usuario).where(Usuario.role == "colaborador", Usuario.setor_interno_id == 1,
+                                                       Usuario.ativo.is_(True)).order_by(Usuario.id))).scalars())
 
 
 async def proximo_disponivel(db: AsyncSession, excluir_id: int | None = None) -> Usuario | None:
-    vendedores = (await db.execute(select(Usuario).where(Usuario.role == "vendedor", Usuario.ativo.is_(True), Usuario.online.is_(True)).order_by(Usuario.id))).scalars().all()
+    vendedores = (await db.execute(select(Usuario).where(Usuario.role == "colaborador", Usuario.setor_interno_id == 1,
+                                                       Usuario.ativo.is_(True), Usuario.online.is_(True)).order_by(Usuario.id))).scalars().all()
     vendedores = [v for v in vendedores if v.id != excluir_id]
     if not vendedores:
         return None
@@ -43,7 +54,7 @@ async def _registrar_bot(db: AsyncSession, conversa: Conversa, texto: str, provi
     db.add(mensagem)
     await db.flush()
     try:
-        await provider.enviar_texto(conversa.numero, texto)
+        mensagem.provider_id = await provider.enviar_texto(conversa.numero, texto)
     except Exception:
         mensagem.envio_status = "falhou"
     else:
@@ -63,7 +74,8 @@ async def _atribuir(db: AsyncSession, conversa: Conversa, usuario: Usuario, moti
         update(Conversa)
         .where(*condicoes)
         .values(atribuido_id=usuario.id, etapa="atribuida", timer_inicio_em=instante if prazo else None,
-                timer_prazo_em=prazo, timer_aviso_em=None, timer_extensoes=0, primeira_resposta_em=None)
+                timer_prazo_em=prazo, timer_aviso_em=None, timer_extensoes=0, primeira_resposta_em=None,
+                tentativas_timer=Conversa.tentativas_timer + 1 if motivo == "timer" else 1 if prazo else 0)
     )
     if resultado.rowcount != 1:
         return False
@@ -74,7 +86,7 @@ async def _atribuir(db: AsyncSession, conversa: Conversa, usuario: Usuario, moti
 
 
 async def receber_mensagem(db: AsyncSession, provider: WhatsAppProvider, entrada: MensagemEntrada) -> None:
-    """Entrada única para simulador e futuro webhook Evolution."""
+    """Entrada única para simulador e webhook da Meta."""
     if entrada.de_mim or "@g.us" in entrada.numero or not entrada.id or not entrada.numero:
         return
     if (await db.execute(select(Mensagem.id).where(Mensagem.provider_id == entrada.id))).first():
@@ -94,6 +106,17 @@ async def receber_mensagem(db: AsyncSession, provider: WhatsAppProvider, entrada
     if resultado.rowcount == 0:
         await db.rollback()
         return
+    if conversa.primeira_resposta_em is None and not em_expediente(now()):
+        if conversa.etapa != "fora_expediente":
+            conversa.etapa = "fora_expediente"
+            conversa.timer_prazo_em = None
+            await _registrar_bot(db, conversa, get_settings().mensagem_fora_expediente, provider)
+        await db.commit()
+        return
+    if conversa.etapa == "fora_expediente":
+        # A reabertura é enviada pelo loop do lifespan, mesmo sem nova mensagem.
+        await db.commit()
+        return
     if entrada.tipo == "midia":
         await _registrar_bot(db, conversa, "No momento só atendemos por texto", provider)
         await db.commit()
@@ -110,7 +133,7 @@ async def receber_mensagem(db: AsyncSession, provider: WhatsAppProvider, entrada
         ordem = int(acao.rsplit(":", 1)[1])
         setor = (await db.execute(select(Setor).where(Setor.ordem == ordem))).scalar_one_or_none()
         responsavel = await db.get(Usuario, setor.responsavel_id) if setor and setor.responsavel_id else None
-        if setor is None or responsavel is None or not responsavel.ativo or responsavel.role != "responsavel":
+        if setor is None or responsavel is None or not responsavel.ativo or responsavel.role != "supervisor":
             respostas.append("Setor sem responsável disponível. Tente novamente.\n" + MENU_SETOR)
         else:
             conversa.setor_id = setor.id
@@ -136,7 +159,7 @@ async def receber_mensagem(db: AsyncSession, provider: WhatsAppProvider, entrada
         if conversa.timer_inicio_em and conversa.timer_prazo_em and instante < conversa.timer_prazo_em and conversa.primeira_resposta_em is None:
             limite = conversa.timer_inicio_em + timedelta(seconds=config.timer_maximo_segundos)
             novo_prazo = min(conversa.timer_prazo_em + timedelta(seconds=config.timer_aviso_segundos), limite)
-            if novo_prazo > conversa.timer_prazo_em:
+            if conversa.timer_extensoes == 0 and novo_prazo > conversa.timer_prazo_em:
                 resultado = await db.execute(update(Conversa).where(
                     Conversa.id == conversa.id, Conversa.etapa == "aviso_transferencia",
                     Conversa.atribuido_id == conversa.atribuido_id,
@@ -145,9 +168,7 @@ async def receber_mensagem(db: AsyncSession, provider: WhatsAppProvider, entrada
                     Conversa.timer_prazo_em > instante,
                 ).values(timer_prazo_em=novo_prazo, timer_extensoes=Conversa.timer_extensoes + 1))
                 if resultado.rowcount == 1:
-                    respostas.append("Tudo bem. Vamos aguardar mais 30 segundos pelo vendedor.")
-            else:
-                respostas.append("O tempo máximo de espera já foi atingido.")
+                    respostas.append(f"Tudo bem. Vamos aguardar mais {config.timer_aviso_segundos} segundos pelo vendedor.")
     else:
         conversa.etapa = novo_estado
     for resposta in respostas:
@@ -160,6 +181,25 @@ async def receber_mensagem(db: AsyncSession, provider: WhatsAppProvider, entrada
 async def verificar_timers(db: AsyncSession, provider: WhatsAppProvider) -> None:
     config = get_settings()
     instante = now()
+    if em_expediente(instante):
+        pendentes = (await db.execute(select(Conversa).where(
+            Conversa.status == "aberta", Conversa.etapa == "fora_expediente",
+        ))).scalars().all()
+        for conversa in pendentes:
+            resultado = await db.execute(update(Conversa).where(
+                Conversa.id == conversa.id, Conversa.etapa == "fora_expediente",
+            ).values(etapa="menu_setor", setor_id=None, atribuido_id=None,
+                     timer_inicio_em=None, timer_prazo_em=None, timer_aviso_em=None,
+                     timer_extensoes=0, tentativas_timer=0))
+            if resultado.rowcount:
+                await _registrar_bot(db, conversa, config.mensagem_reabertura + "\n" + await menu_setores(db), provider)
+    else:
+        await db.execute(update(Conversa).where(
+            Conversa.status == "aberta", Conversa.primeira_resposta_em.is_(None),
+            Conversa.timer_prazo_em.is_not(None),
+        ).values(etapa="fora_expediente", timer_prazo_em=None))
+        await db.commit()
+        return
     conversas = (await db.execute(select(Conversa).join(Setor, Conversa.setor_id == Setor.id).where(
         Setor.ordem == 1, Conversa.status == "aberta", Conversa.primeira_resposta_em.is_(None),
         Conversa.timer_prazo_em.is_not(None), Conversa.timer_prazo_em <= instante,
@@ -173,11 +213,24 @@ async def verificar_timers(db: AsyncSession, provider: WhatsAppProvider) -> None
                 Conversa.timer_prazo_em <= instante,
             ).values(etapa="aviso_transferencia", timer_aviso_em=instante, timer_prazo_em=prazo))
             if resultado.rowcount:
-                await _registrar_bot(db, conversa, "Ainda não recebemos resposta. Transferiremos em 30 segundos. Responda 1 para esperar mais 30 segundos.", provider)
+                await _registrar_bot(db, conversa, f"Ainda não recebemos resposta. Transferiremos em {config.timer_aviso_segundos} segundos. Responda 1 para esperar mais {config.timer_aviso_segundos} segundos.", provider)
         elif conversa.etapa == "aviso_transferencia":
+            if conversa.tentativas_timer >= 2:
+                resultado = await db.execute(update(Conversa).where(
+                    Conversa.id == conversa.id, Conversa.etapa == "aviso_transferencia",
+                    Conversa.primeira_resposta_em.is_(None), Conversa.timer_prazo_em <= instante,
+                ).values(etapa="standby", timer_prazo_em=None))
+                if resultado.rowcount:
+                    await _registrar_bot(db, conversa, config.mensagem_standby, provider)
+                continue
             proximo = await proximo_disponivel(db, excluir_id=conversa.atribuido_id)
             if proximo is None:
-                # Sem outro vendedor online, mantém a conversa com o atual e tenta de novo.
+                resultado = await db.execute(update(Conversa).where(
+                    Conversa.id == conversa.id, Conversa.etapa == "aviso_transferencia",
+                    Conversa.primeira_resposta_em.is_(None), Conversa.timer_prazo_em <= instante,
+                ).values(etapa="standby", timer_prazo_em=None))
+                if resultado.rowcount:
+                    await _registrar_bot(db, conversa, config.mensagem_standby, provider)
                 continue
             await _atribuir(db, conversa, proximo, "timer", "aviso_transferencia", provider)
     await db.commit()

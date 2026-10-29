@@ -25,14 +25,14 @@ def validar_token(token: str) -> None:
 
 
 def suporte(user: UsuarioAtual = Depends(get_current_user)) -> UsuarioAtual:
-    if user.role not in {"gestor", "responsavel"}:
+    if user.role not in {"gestor", "supervisor"}:
         raise HTTPException(status_code=403, detail="Apenas gestor ou responsável")
     return user
 
 
 def vendedor(user: UsuarioAtual = Depends(get_current_user)) -> UsuarioAtual:
-    if user.role != "vendedor":
-        raise HTTPException(status_code=403, detail="Apenas vendedor")
+    if user.role != "colaborador":
+        raise HTTPException(status_code=403, detail="Apenas colaborador")
     return user
 
 

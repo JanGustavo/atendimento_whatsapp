@@ -12,11 +12,24 @@ from app.api.deps import UsuarioAtual, somente_gestor
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.utils import now
-from app.models import Atribuicao, Conversa, Mensagem, Setor, Usuario
+from app.models import Atribuicao, Conversa, Mensagem, Setor, SetorInterno, SimuladorEstado, Usuario
 from app.providers import provider_para_numero
 from app.services.auth_service import get_password_hash
 
 router = APIRouter(prefix="/api/gestor")
+
+
+@router.post("/simulador")
+async def configurar_simulador(request: Request, db: AsyncSession = Depends(get_db),
+                              user: UsuarioAtual = Depends(somente_gestor)):
+    dados = await form(request)
+    estado = await db.get(SimuladorEstado, 1)
+    if estado is None:
+        estado = SimuladorEstado(id=1, ativo=False)
+        db.add(estado)
+    estado.ativo = dados.get("ativo") == "on"
+    await db.commit()
+    return {"ativo": estado.ativo}
 
 
 @router.post("/usuarios")
@@ -27,16 +40,21 @@ async def criar_usuario(
 ):
     dados = await form(request)
     role = dados.get("role", "")
-    if role not in {"vendedor", "responsavel", "gestor"} or len(dados.get("senha", "")) < 8:
+    if role not in {"colaborador", "supervisor", "gestor"} or len(dados.get("senha", "")) < 8:
         raise HTTPException(status_code=422, detail="Papel ou senha inválidos")
     email = dados.get("email", "").strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=422, detail="Email inválido")
     if (await db.execute(select(Usuario.id).where(Usuario.email == email))).first():
         raise HTTPException(status_code=409, detail="Email já existe")
+    setor_interno_id = dados.get("setor_interno_id") or str({"colaborador": 1, "supervisor": 3, "gestor": 4}[role])
+    setor_interno = await db.get(SetorInterno, int(setor_interno_id)) if setor_interno_id.isdecimal() else None
+    if setor_interno is None:
+        raise HTTPException(status_code=422, detail="Setor interno inválido")
     db.add(Usuario(
         nome=dados.get("nome", "").strip(), email=email,
         senha_hash=get_password_hash(dados["senha"]), role=role, ativo=True, online=True,
+        setor_interno_id=setor_interno.id,
     ))
     await db.commit()
     return {"ok": True}
@@ -54,7 +72,7 @@ async def editar_usuario(
         raise HTTPException(status_code=404)
     dados = await form(request)
     role = dados.get("role", usuario.role)
-    if role not in {"vendedor", "responsavel", "gestor"}:
+    if role not in {"colaborador", "supervisor", "gestor"}:
         raise HTTPException(status_code=422)
     email = dados.get("email", usuario.email).strip().lower()
     if not email or "@" not in email:
@@ -66,6 +84,12 @@ async def editar_usuario(
     usuario.role = role
     usuario.ativo = dados.get("ativo") == "on"
     usuario.online = dados.get("online") == "on"
+    if "setor_interno_id" in dados:
+        setor_id = dados["setor_interno_id"]
+        setor_interno = await db.get(SetorInterno, int(setor_id)) if setor_id.isdecimal() else None
+        if setor_interno is None:
+            raise HTTPException(status_code=422, detail="Setor interno inválido")
+        usuario.setor_interno_id = setor_interno.id
     if dados.get("senha"):
         if len(dados["senha"]) < 8:
             raise HTTPException(status_code=422)
@@ -92,7 +116,7 @@ async def configurar_setor(
         raise HTTPException(status_code=409, detail="Setor já existe")
     responsavel_id = dados.get("responsavel_id", "")
     responsavel = await db.get(Usuario, int(responsavel_id)) if responsavel_id.isdecimal() else None
-    if setor.ordem != 1 and (responsavel is None or responsavel.role != "responsavel" or not responsavel.ativo):
+    if setor.ordem != 1 and (responsavel is None or responsavel.role != "supervisor" or not responsavel.ativo):
         raise HTTPException(status_code=422, detail="Responsável inválido")
     setor.nome = nome
     setor.responsavel_id = responsavel.id if responsavel else None
@@ -113,8 +137,7 @@ async def transferir(
     alvo = await db.get(Usuario, int(alvo_id)) if alvo_id.isdecimal() else None
     setor = await db.get(Setor, conversa.setor_id) if conversa.setor_id else None
     vendas = setor is not None and setor.ordem == 1
-    papel_esperado = "vendedor" if vendas else "responsavel"
-    if alvo is None or not alvo.ativo or alvo.role != papel_esperado:
+    if alvo is None or not alvo.ativo or (vendas and (alvo.role != "colaborador" or alvo.setor_interno_id != 1)) or (not vendas and alvo.role != "supervisor"):
         raise HTTPException(status_code=422, detail="Destino inválido")
     antigo = conversa.atribuido_id
     if antigo == alvo.id:
@@ -126,7 +149,7 @@ async def transferir(
         atribuido_id=alvo.id, etapa="atribuida", primeira_resposta_em=None,
         timer_inicio_em=instante if vendas else None,
         timer_prazo_em=instante + timedelta(seconds=get_settings().timer_espera_segundos) if vendas else None,
-        timer_aviso_em=None, timer_extensoes=0,
+        timer_aviso_em=None, timer_extensoes=0, tentativas_timer=1 if vendas else 0,
     ))
     if resultado.rowcount != 1:
         await db.rollback()
@@ -141,7 +164,7 @@ async def transferir(
         db.add(mensagem)
         await db.flush()
         try:
-            await provider_para_numero(conversa.numero).enviar_texto(conversa.numero, texto)
+            mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(conversa.numero, texto)
         except Exception:
             mensagem.envio_status = "falhou"
             await db.commit()

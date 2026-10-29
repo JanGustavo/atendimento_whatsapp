@@ -14,6 +14,8 @@ from app.api.chamados import router as chamados_router
 from app.api.webhook import router as webhook_router
 from app.api.frontend import router as frontend_router
 from app.api.simulador import router as simulador_router
+from app.api.interno import router as interno_router
+from app.api.eventos import router as eventos_router
 from app.core.database import async_session_maker
 from app.providers import provider_atual
 from app.services.atendimento import verificar_timers
@@ -54,6 +56,8 @@ app.include_router(auth_router)
 app.include_router(atendimentos_router)
 app.include_router(gestor_router)
 app.include_router(chamados_router)
+app.include_router(interno_router)
+app.include_router(eventos_router)
 app.include_router(webhook_router)
 
 
@@ -68,7 +72,7 @@ async def painel_react():
     index = web_dir / "index.html"
     if not index.exists():
         raise HTTPException(status_code=503, detail="Frontend ainda não compilado")
-    return FileResponse(index)
+    return FileResponse(index, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/favicon.svg", include_in_schema=False)

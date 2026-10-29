@@ -27,7 +27,7 @@ def decode_token(token: str) -> tuple[int, str] | None:
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
         user_id, role = payload.get("sub"), payload.get("role")
-        if not isinstance(user_id, str) or not user_id.isdecimal() or role not in {"vendedor", "responsavel", "gestor"}:
+        if not isinstance(user_id, str) or not user_id.isdecimal() or role not in {"colaborador", "supervisor", "gestor"}:
             return None
         return int(user_id), role
     except JWTError:

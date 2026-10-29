@@ -10,7 +10,7 @@ async def test_painel_react_e_api_isolada_por_papel(ambiente):
 
     await entrar(client, "a@teste.local")
     perfil = (await client.get("/api/me")).json()
-    assert perfil == {"id": 2, "nome": "Vendedor A", "role": "vendedor"}
+    assert perfil == {"id": 2, "nome": "Vendedor A", "email": "a@teste.local", "role": "colaborador"}
     lista = (await client.get("/api/atendimentos")).json()
     assert [item["id"] for item in lista] == [10]
     assert (await client.get("/api/atendimentos/11")).status_code == 404

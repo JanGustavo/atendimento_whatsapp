@@ -1,14 +1,18 @@
 """Mutações de atendimentos com isolamento no servidor."""
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.requests import Request
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import form
 from app.api.deps import UsuarioAtual, get_current_user
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.utils import now
-from app.models import Conversa, Mensagem
+from app.models import Atribuicao, Conversa, LeituraConversa, Mensagem, Setor, Usuario
 from app.providers import provider_para_numero
 
 router = APIRouter(prefix="/api/atendimentos")
@@ -26,6 +30,26 @@ async def conversa_visivel(db: AsyncSession, conversa_id: int, user: UsuarioAtua
     if conversa is None:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
     return conversa
+
+
+@router.post("/{conversa_id}/leitura")
+async def marcar_leitura(conversa_id: int, db: AsyncSession = Depends(get_db),
+                        user: UsuarioAtual = Depends(get_current_user)):
+    await conversa_visivel(db, conversa_id, user)
+    ultimo_id = (await db.execute(select(func.max(Mensagem.id)).where(
+        Mensagem.conversa_id == conversa_id, Mensagem.origem == "cliente"
+    ))).scalar() or 0
+    if ultimo_id:
+        insercao = sqlite_insert(LeituraConversa).values(
+            conversa_id=conversa_id, usuario_id=user.user_id,
+            ultima_mensagem_id=ultimo_id, lida_em=now())
+        await db.execute(insercao.on_conflict_do_update(
+            index_elements=[LeituraConversa.conversa_id, LeituraConversa.usuario_id],
+            set_={"ultima_mensagem_id": ultimo_id, "lida_em": now()},
+            where=LeituraConversa.ultima_mensagem_id < ultimo_id,
+        ))
+        await db.commit()
+    return {"ultima_mensagem_id": ultimo_id}
 
 
 @router.post("/{conversa_id}/mensagens")
@@ -53,19 +77,87 @@ async def enviar(
                         texto=texto, envio_status="pendente", criada_em=now())
     db.add(mensagem)
     await db.flush()
+    papel = {"colaborador": "Atendente", "supervisor": "Supervisor", "gestor": "Gestor"}[user.role]
+    texto_cliente = f"*{papel} {user.nome}*\n{texto}"
     try:
-        await provider_para_numero(conversa.numero).enviar_texto(conversa.numero, texto)
+        mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(conversa.numero, texto_cliente)
     except Exception:
         mensagem.envio_status = "falhou"
         await db.commit()
         raise HTTPException(status_code=502, detail="Envio ao WhatsApp falhou. A mensagem ficou marcada como falhou; tente enviá-la novamente.")
     mensagem.envio_status = "enviada"
-    if user.role == "vendedor":
+    if user.role == "colaborador":
         await db.execute(update(Conversa).where(*condicoes).values(
             primeira_resposta_em=func.coalesce(Conversa.primeira_resposta_em, now()),
             timer_prazo_em=None, etapa="atribuida"))
     await db.commit()
     return {"id": mensagem.id, "envio_status": mensagem.envio_status}
+
+
+@router.post("/{conversa_id}/transferir")
+async def transferir_atendimento(
+    conversa_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    conversa = await conversa_visivel(db, conversa_id, user)
+    if conversa.status != "aberta" or conversa.atribuido_id is None:
+        raise HTTPException(status_code=409, detail="Conversa sem atendente ativo")
+    dados = await form(request)
+    destino = dados.get("destino", "")
+    setor = None
+    if destino.startswith("vendedor:") and destino[9:].isdecimal():
+        setor = (await db.execute(select(Setor).where(Setor.ordem == 1))).scalar_one_or_none()
+        if setor is None:
+            raise HTTPException(status_code=422, detail="Setor de vendas indisponível")
+        alvo = await db.get(Usuario, int(destino[9:]))
+        if alvo is None or alvo.role != "colaborador" or alvo.setor_interno_id != 1 or not alvo.ativo:
+            raise HTTPException(status_code=422, detail="Vendedor inválido")
+    elif destino.startswith("setor:") and destino[6:].isdecimal():
+        setor = await db.get(Setor, int(destino[6:]))
+        if setor is None or setor.ordem == 1 or setor.responsavel_id is None:
+            raise HTTPException(status_code=422, detail="Setor inválido")
+        alvo = await db.get(Usuario, setor.responsavel_id)
+        if alvo is None or alvo.role != "supervisor" or not alvo.ativo:
+            raise HTTPException(status_code=422, detail="Responsável indisponível")
+    else:
+        raise HTTPException(status_code=422, detail="Destino inválido")
+    if alvo.id == conversa.atribuido_id:
+        raise HTTPException(status_code=409, detail="Conversa já atribuída a este atendente")
+    instante = now()
+    antigo_id = conversa.atribuido_id
+    novo_setor_id = setor.id if setor else conversa.setor_id
+    vendas = setor.ordem == 1
+    prazo = instante + timedelta(seconds=get_settings().timer_espera_segundos) if vendas else None
+    condicoes = [Conversa.id == conversa.id, Conversa.status == "aberta", Conversa.atribuido_id == antigo_id]
+    resultado = await db.execute(update(Conversa).where(*condicoes).values(
+        atribuido_id=alvo.id, setor_id=novo_setor_id, etapa="atribuida", primeira_resposta_em=None,
+        timer_inicio_em=instante if vendas else None, timer_prazo_em=prazo,
+        timer_aviso_em=None, timer_extensoes=0, tentativas_timer=1 if vendas else 0,
+    ))
+    if resultado.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Conversa já transferida")
+    db.add(Atribuicao(conversa_id=conversa.id, de_usuario_id=antigo_id,
+                      para_usuario_id=alvo.id, motivo="atendente", criada_em=instante))
+    alvo.ultima_atribuicao_em = instante
+    config = get_settings()
+    if config.aviso_transferencia_ativo:
+        aviso = config.aviso_transferencia_texto.replace("{nome}", alvo.nome)
+        mensagem = Mensagem(conversa_id=conversa.id, origem="bot", texto=aviso,
+                            envio_status="pendente", criada_em=instante)
+        db.add(mensagem)
+        await db.flush()
+        try:
+            mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(conversa.numero, aviso)
+        except Exception:
+            mensagem.envio_status = "falhou"
+            await db.commit()
+            raise HTTPException(status_code=502, detail="Transferência salva, mas o aviso ao cliente falhou.")
+        mensagem.envio_status = "enviada"
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/{conversa_id}/encerrar")

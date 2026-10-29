@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.database import async_session_maker
-from app.models import Computador, Setor, Usuario
+from app.models import Computador, Setor, SetorInterno, Usuario
 from app.services.auth_service import get_password_hash
 
 
@@ -12,25 +12,30 @@ async def seed():
     settings = get_settings()
     passwords = {
         "gestor": settings.seed_gestor_password,
-        "vendedor": settings.seed_vendedor_password,
-        "responsavel": settings.seed_responsavel_password,
+        "colaborador": settings.seed_vendedor_password,
+        "supervisor": settings.seed_responsavel_password,
     }
     if any(len(value) < 8 for value in passwords.values()):
         raise RuntimeError("Defina SEED_*_PASSWORD com pelo menos 8 caracteres no .env")
     pessoas = [
         ("Gestor", "gestor@demo.local", "gestor"),
-        ("Vendedor 1", "vendedor1@demo.local", "vendedor"),
-        ("Vendedor 2", "vendedor2@demo.local", "vendedor"),
-        ("Vendedor 3", "vendedor3@demo.local", "vendedor"),
-        ("Responsável 1", "responsavel1@demo.local", "responsavel"),
-        ("Responsável 2", "responsavel2@demo.local", "responsavel"),
+        ("Vendedor 1", "vendedor1@demo.local", "colaborador"),
+        ("Vendedor 2", "vendedor2@demo.local", "colaborador"),
+        ("Vendedor 3", "vendedor3@demo.local", "colaborador"),
+        ("Responsável 1", "responsavel1@demo.local", "supervisor"),
+        ("Responsável 2", "responsavel2@demo.local", "supervisor"),
     ]
     async with async_session_maker() as db:
+        for identificador, nome in [(1, "Vendas"), (2, "Estoque"), (3, "Garantia"), (4, "Administração")]:
+            if not await db.get(SetorInterno, identificador):
+                db.add(SetorInterno(id=identificador, nome=nome))
+        await db.flush()
         for nome, email, role in pessoas:
             if not (await db.execute(select(Usuario.id).where(Usuario.email == email))).first():
-                db.add(Usuario(nome=nome, email=email, role=role, senha_hash=get_password_hash(passwords[role]), ativo=True, online=True))
+                setor_interno_id = {"colaborador": 1, "supervisor": 3, "gestor": 4}[role]
+                db.add(Usuario(nome=nome, email=email, role=role, senha_hash=get_password_hash(passwords[role]), ativo=True, online=True, setor_interno_id=setor_interno_id))
         await db.flush()
-        responsaveis = (await db.execute(select(Usuario).where(Usuario.role == "responsavel").order_by(Usuario.id))).scalars().all()
+        responsaveis = (await db.execute(select(Usuario).where(Usuario.role == "supervisor").order_by(Usuario.id))).scalars().all()
         setores = [(1, "Vendas/Compra", None), (2, "Devolução", responsaveis[0].id), (3, "Garantia", responsaveis[1].id), (4, "Outro", responsaveis[0].id)]
         for ordem, nome, responsavel_id in setores:
             if not (await db.execute(select(Setor.id).where(Setor.ordem == ordem))).first():

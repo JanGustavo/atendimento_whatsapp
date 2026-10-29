@@ -57,7 +57,7 @@ async def test_opcao_zero_escolhe_menos_conversas_e_historico_original(ambiente,
     assert conversa.etapa == "atribuida"
     assert [(a.de_usuario_id, a.para_usuario_id) for a in atribuicoes] == [(None, 5)]
     assert "Vendedor C" in mensagens[-1].texto
-    assert conversa.timer_prazo_em == BASE + timedelta(seconds=60)
+    assert conversa.timer_prazo_em == BASE + timedelta(seconds=90)
 
 
 async def test_desempate_por_ultima_atribuicao_e_somente_online(ambiente):
@@ -77,24 +77,24 @@ async def test_desempate_por_ultima_atribuicao_e_somente_online(ambiente):
         assert (await proximo_disponivel(db)).id == 5
 
 
-async def test_timer_avisa_em_60_e_transfere_em_90(ambiente, monkeypatch):
+async def test_timer_avisa_em_90_e_transfere_em_150(ambiente, monkeypatch):
     _, maker = ambiente
     instante = [BASE]
     monkeypatch.setattr("app.services.atendimento.now", lambda: instante[0])
     await enviar(maker, "5511888003", "1", "tempo-1")
     await enviar(maker, "5511888003", "1", "tempo-2")  # Vendedor A
-    instante[0] = BASE + timedelta(seconds=59)
+    instante[0] = BASE + timedelta(seconds=89)
     await timer(maker)
     conversa, mensagens, _ = await dados(maker, "5511888003")
     assert conversa.etapa == "atribuida"
     assert not any("Transferiremos" in m.texto for m in mensagens)
-    instante[0] = BASE + timedelta(seconds=60)
+    instante[0] = BASE + timedelta(seconds=90)
     await timer(maker)
     conversa, mensagens, _ = await dados(maker, "5511888003")
     assert conversa.etapa == "aviso_transferencia"
-    assert conversa.timer_prazo_em == BASE + timedelta(seconds=90)
-    assert "Transferiremos em 30 segundos" in mensagens[-1].texto
-    instante[0] = BASE + timedelta(seconds=90)
+    assert conversa.timer_prazo_em == BASE + timedelta(seconds=150)
+    assert "Transferiremos em 60 segundos" in mensagens[-1].texto
+    instante[0] = BASE + timedelta(seconds=150)
     await timer(maker)
     conversa, mensagens, atribuicoes = await dados(maker, "5511888003")
     assert conversa.atribuido_id == 5
@@ -103,31 +103,93 @@ async def test_timer_avisa_em_60_e_transfere_em_90(ambiente, monkeypatch):
     assert "Vendedor C" in mensagens[-1].texto
 
 
-async def test_cliente_estende_ate_150_segundos(ambiente, monkeypatch):
+async def test_cliente_estende_ate_210_segundos(ambiente, monkeypatch):
     _, maker = ambiente
     instante = [BASE]
     monkeypatch.setattr("app.services.atendimento.now", lambda: instante[0])
     await enviar(maker, "5511888004", "1", "ext-1")
     await enviar(maker, "5511888004", "1", "ext-2")
-    instante[0] = BASE + timedelta(seconds=60)
+    instante[0] = BASE + timedelta(seconds=90)
     await timer(maker)
-    instante[0] = BASE + timedelta(seconds=70)
+    instante[0] = BASE + timedelta(seconds=100)
     await enviar(maker, "5511888004", "1", "ext-3")
     conversa, _, _ = await dados(maker, "5511888004")
-    assert conversa.timer_prazo_em == BASE + timedelta(seconds=120)
-    instante[0] = BASE + timedelta(seconds=100)
+    assert conversa.timer_prazo_em == BASE + timedelta(seconds=210)
+    instante[0] = BASE + timedelta(seconds=130)
     await enviar(maker, "5511888004", "1", "ext-4")
     conversa, _, _ = await dados(maker, "5511888004")
-    assert conversa.timer_prazo_em == BASE + timedelta(seconds=150)
-    instante[0] = BASE + timedelta(seconds=149)
+    assert conversa.timer_prazo_em == BASE + timedelta(seconds=210)
+    instante[0] = BASE + timedelta(seconds=209)
     await timer(maker)
     conversa, _, _ = await dados(maker, "5511888004")
     assert conversa.atribuido_id == 2
-    instante[0] = BASE + timedelta(seconds=150)
+    instante[0] = BASE + timedelta(seconds=210)
     await timer(maker)
     conversa, _, historico = await dados(maker, "5511888004")
     assert conversa.atribuido_id == 5
     assert len(historico) == 2
+
+
+async def test_duas_tentativas_sem_resposta_entram_em_standby_sem_repetir_bot(ambiente, monkeypatch):
+    _, maker = ambiente
+    instante = [BASE]
+    monkeypatch.setattr("app.services.atendimento.now", lambda: instante[0])
+    await enviar(maker, "5511888080", "1", "stand-1")
+    await enviar(maker, "5511888080", "1", "stand-2")
+    for segundos in (90, 150, 240, 300):
+        instante[0] = BASE + timedelta(seconds=segundos)
+        await timer(maker)
+    conversa, mensagens, historico = await dados(maker, "5511888080")
+    assert conversa.etapa == "standby"
+    assert conversa.timer_prazo_em is None
+    assert conversa.tentativas_timer == 2
+    assert len(historico) == 2
+    assert "ficou em espera" in mensagens[-1].texto
+    quantidade = len(mensagens)
+    instante[0] = BASE + timedelta(seconds=600)
+    await timer(maker)
+    await enviar(maker, "5511888080", "1", "stand-3")
+    assert len((await dados(maker, "5511888080"))[1]) == quantidade + 1
+
+
+async def test_fora_expediente_responde_uma_vez_e_reabre_no_inicio(ambiente, monkeypatch):
+    _, maker = ambiente
+    from app.core.config import get_settings
+    config = get_settings().model_copy(update={"expediente_inicio": "07:00", "expediente_fim": "18:30"})
+    monkeypatch.setattr("app.services.atendimento.get_settings", lambda: config)
+    instante = [datetime(2026, 10, 26, 23, 0, 0)]  # 20h em São Paulo.
+    monkeypatch.setattr("app.services.atendimento.now", lambda: instante[0])
+    await enviar(maker, "5511888081", "oi", "fora-1")
+    await enviar(maker, "5511888081", "oi de novo", "fora-2")
+    conversa, mensagens, _ = await dados(maker, "5511888081")
+    assert conversa.etapa == "fora_expediente"
+    assert [m.origem for m in mensagens] == ["cliente", "bot", "cliente"]
+    instante[0] = datetime(2026, 10, 27, 10, 0, 0)  # 7h em São Paulo.
+    await timer(maker)
+    await timer(maker)
+    conversa, mensagens, _ = await dados(maker, "5511888081")
+    assert conversa.etapa == "menu_setor"
+    assert len([m for m in mensagens if m.origem == "bot"]) == 2
+    assert "Estamos de volta" in mensagens[-1].texto and "Escolha o setor" in mensagens[-1].texto
+
+
+async def test_timer_pausa_ao_fechar_expediente_sem_enviar_aviso(ambiente, monkeypatch):
+    _, maker = ambiente
+    from app.core.config import get_settings
+    config = get_settings().model_copy(update={"expediente_inicio": "07:00", "expediente_fim": "18:30"})
+    monkeypatch.setattr("app.services.atendimento.get_settings", lambda: config)
+    instante = [datetime(2026, 10, 26, 20, 0, 0)]  # 17h em São Paulo.
+    monkeypatch.setattr("app.services.atendimento.now", lambda: instante[0])
+    await enviar(maker, "5511888082", "1", "pausa-1")
+    await enviar(maker, "5511888082", "1", "pausa-2")
+    conversa, mensagens, _ = await dados(maker, "5511888082")
+    quantidade = len(mensagens)
+    instante[0] = datetime(2026, 10, 26, 22, 0, 0)  # 19h em São Paulo.
+    await timer(maker)
+    conversa, mensagens, _ = await dados(maker, "5511888082")
+    assert conversa.etapa == "fora_expediente"
+    assert conversa.timer_prazo_em is None
+    assert len(mensagens) == quantidade
 
 
 async def test_primeira_resposta_humana_cancela_timer(ambiente, monkeypatch):
@@ -139,7 +201,7 @@ async def test_primeira_resposta_humana_cancela_timer(ambiente, monkeypatch):
     conversa, _, _ = await dados(maker, "5511888005")
     await entrar(client, "a@teste.local")
     assert (await client.post(f"/api/atendimentos/{conversa.id}/mensagens", data={"texto": "Bom dia"})).status_code == 200
-    instante[0] = BASE + timedelta(seconds=160)
+    instante[0] = BASE + timedelta(seconds=220)
     await timer(maker)
     conversa, mensagens, historico = await dados(maker, "5511888005")
     assert conversa.atribuido_id == 2

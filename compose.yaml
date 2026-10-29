@@ -2,6 +2,7 @@ services:
   app:
     build: .
     env_file: .env
+    restart: unless-stopped
     ports:
       - "${APP_BIND_HOST:-127.0.0.1}:18087:8000"
     volumes:
@@ -13,49 +14,16 @@ services:
       start_period: 15s
       retries: 5
 
-  evolution:
-    image: evoapicloud/evolution-api:v2.3.7
-    profiles: ["evolution"]
+  cloudflared:
+    image: cloudflare/cloudflared@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
+    profiles: [webhook]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
     environment:
-      SERVER_URL: http://evolution:8080
-      DATABASE_ENABLED: "true"
-      DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD}@evolution-db:5432/evolution?schema=public
-      DATABASE_CONNECTION_CLIENT_NAME: fortgiro
-      CACHE_REDIS_ENABLED: "true"
-      CACHE_REDIS_URI: redis://evolution-redis:6379/6
-      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
-    volumes:
-      - evolution_instances:/evolution/instances
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
-      evolution-db:
+      app:
         condition: service_healthy
-      evolution-redis:
-        condition: service_started
-
-  evolution-db:
-    image: postgres:16-alpine
-    profiles: ["evolution"]
-    environment:
-      POSTGRES_DB: evolution
-      POSTGRES_USER: evolution
-      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD}
-    volumes:
-      - evolution_db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  evolution-redis:
-    image: redis:7-alpine
-    profiles: ["evolution"]
-    volumes:
-      - evolution_redis:/data
 
 volumes:
   atendimento_data:
-  evolution_instances:
-  evolution_db:
-  evolution_redis:

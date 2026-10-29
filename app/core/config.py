@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     app_log_level: str = "INFO"
     chamado_install_token: str = ""
     panel_https_host: str = ""
+    media_dir: str = "./media"
     timer_espera_segundos: int = 90
     timer_aviso_segundos: int = 60
     timer_maximo_segundos: int = 210

@@ -43,6 +43,17 @@ class MensagemInterna(Base):
     remetente_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
     destinatario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
     texto: Mapped[str] = mapped_column(Text, nullable=False)
+    imagem_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
+    criada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+
+
+class MensagemGrupo(Base):
+    __tablename__ = "mensagens_grupo"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    setor_id: Mapped[int] = mapped_column(ForeignKey("setores_internos.id"), index=True)
+    remetente_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    texto: Mapped[str] = mapped_column(Text, nullable=False)
+    imagem_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
     criada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
 

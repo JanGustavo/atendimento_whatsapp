@@ -19,6 +19,36 @@ from app.services.auth_service import get_password_hash
 router = APIRouter(prefix="/api/gestor")
 
 
+@router.post("/setores-internos")
+async def criar_setor_interno(request: Request, db: AsyncSession = Depends(get_db),
+                              user: UsuarioAtual = Depends(somente_gestor)):
+    nome = (await form(request)).get("nome", "").strip()
+    if not 1 <= len(nome) <= 80:
+        raise HTTPException(status_code=422, detail="Nome do setor inválido")
+    if (await db.execute(select(SetorInterno.id).where(SetorInterno.nome == nome))).first():
+        raise HTTPException(status_code=409, detail="Setor já existe")
+    setor = SetorInterno(nome=nome)
+    db.add(setor)
+    await db.commit()
+    return {"id": setor.id, "nome": setor.nome}
+
+
+@router.post("/setores-internos/{setor_id}")
+async def renomear_setor_interno(setor_id: int, request: Request, db: AsyncSession = Depends(get_db),
+                                 user: UsuarioAtual = Depends(somente_gestor)):
+    setor = await db.get(SetorInterno, setor_id)
+    if setor is None:
+        raise HTTPException(status_code=404, detail="Setor não encontrado")
+    nome = (await form(request)).get("nome", "").strip()
+    if not 1 <= len(nome) <= 80:
+        raise HTTPException(status_code=422, detail="Nome do setor inválido")
+    if nome != setor.nome and (await db.execute(select(SetorInterno.id).where(SetorInterno.nome == nome))).first():
+        raise HTTPException(status_code=409, detail="Setor já existe")
+    setor.nome = nome
+    await db.commit()
+    return {"id": setor.id, "nome": setor.nome}
+
+
 @router.post("/simulador")
 async def configurar_simulador(request: Request, db: AsyncSession = Depends(get_db),
                               user: UsuarioAtual = Depends(somente_gestor)):

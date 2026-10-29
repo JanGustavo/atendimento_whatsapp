@@ -17,6 +17,12 @@ O painel está publicado em [https://painel.jangustavo.me](https://painel.jangus
 
 O painel e o formulário de chamados usam React. A API JSON fica em `/api`; os testes rodam com `pytest tests/ -v` em um ambiente Python com as dependências de desenvolvimento instaladas.
 
+## Equipes e imagens internas
+
+O gestor cria equipes internas em **Visão do gestor → Setores** e vincula usuários em **Equipe**. Um grupo de chat aparece automaticamente para os membros quando há pelo menos dois usuários ativos no setor. Mensagens do grupo e conversas individuais são privadas para seus participantes.
+
+No chat interno, o navegador reduz imagens para até 1600 px e converte para WebP antes do envio. O servidor limita cada arquivo a 2 MB, guarda o WebP em `MEDIA_DIR` (use `/data/media` no Docker) e grava no SQLite somente uma chave. A imagem é entregue por rota autenticada, com autorização por conversa; não existe link público direto ao arquivo. Mantenha o volume `atendimento_data` nos backups junto com o banco.
+
 ## Chamados de computador
 
 O gestor cadastra os PCs na aba **Chamados** do painel. A equipe abre pedidos em `/chamado?token=<CHAMADO_INSTALL_TOKEN>`; o token vem do `.env` e pode ser colocado em um favorito/atalho do navegador de cada PC. O seed também cria quatro PCs de demonstração, incluindo o PC do dono. Gestor e supervisor veem todos os pedidos, registram uma solicitação remota **simulada** e fecham o chamado com a solução.

@@ -22,3 +22,4 @@
 .delivery-lida{color:#2676b5;font-weight:700}.delivery-entregue{color:#64758b}.delivery-falhou{color:#b7332b;font-weight:700}.conversation-item-meta .nav-count{margin-left:0}.chat-stage{gap:8px;flex-wrap:wrap}
 
 .retry-message{display:block;margin-top:7px;border:0;background:transparent;color:#d6a54d;font-size:11px;font-weight:700;text-decoration:underline;cursor:pointer;padding:0}.retry-message:disabled{opacity:.5;cursor:default}
+.interno-imagem{display:block;max-width:min(100%,420px);max-height:360px;object-fit:contain;border-radius:8px;margin-top:6px}.interno-image-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:12px}.interno-image-controls label{display:flex;align-items:center;gap:8px}.interno-image-controls input{max-width:220px}.interno-image-controls small{color:#8a8b95}@media(max-width:620px){.interno-image-controls{align-items:stretch;flex-direction:column}.interno-image-controls input{max-width:100%}}

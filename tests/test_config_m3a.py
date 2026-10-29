@@ -22,7 +22,7 @@ def test_configuracao_do_env_para_timer_e_provider(tmp_path, monkeypatch):
 
 
 def test_configuracao_meta_vem_do_env(tmp_path, monkeypatch):
-    for nome in ("JWT_SECRET", "WHATSAPP_PROVIDER", "META_PHONE_NUMBER_ID", "META_ACCESS_TOKEN",
+    for nome in ("JWT_SECRET", "WHATSAPP_PROVIDER", "META_GRAPH_VERSION", "META_PHONE_NUMBER_ID", "META_ACCESS_TOKEN",
                  "META_VERIFY_TOKEN", "META_APP_SECRET"):
         monkeypatch.delenv(nome, raising=False)
     arquivo = tmp_path / ".env"

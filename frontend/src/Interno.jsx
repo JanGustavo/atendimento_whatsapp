@@ -15,20 +15,40 @@ async function leitura(url) {
   return resposta.json()
 }
 
+async function converterWebp(arquivo) {
+  if (arquivo.size > 12 * 1024 * 1024) throw new Error('Escolha uma imagem de até 12 MB.')
+  const origem = await createImageBitmap(arquivo)
+  try {
+    const escala = Math.min(1, 1600 / Math.max(origem.width, origem.height))
+    const tela = document.createElement('canvas')
+    tela.width = Math.max(1, Math.round(origem.width * escala))
+    tela.height = Math.max(1, Math.round(origem.height * escala))
+    tela.getContext('2d').drawImage(origem, 0, 0, tela.width, tela.height)
+    const webp = await new Promise(resolve => tela.toBlob(resolve, 'image/webp', 0.78))
+    if (!webp || webp.type !== 'image/webp' || webp.size > 2 * 1024 * 1024) throw new Error('Não foi possível preparar a imagem em WebP (limite de 2 MB).')
+    return webp
+  } finally { origem.close() }
+}
+
 export default function Interno({ me, abrirColegaId, onOpen }) {
   const [setores, setSetores] = useState([])
   const [aberto, setAberto] = useState(null)
   const [colega, setColega] = useState(null)
+  const [grupo, setGrupo] = useState(null)
   const [mensagens, setMensagens] = useState([])
   const [texto, setTexto] = useState('')
+  const [imagem, setImagem] = useState(null)
   const [erro, setErro] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [temAnteriores, setTemAnteriores] = useState(false)
   const rolagem = useRef(null)
+  const arquivoInput = useRef(null)
   const primeiroId = useRef(null)
   const carregando = useRef(false)
   const ultimoVisivel = useRef(null)
   const colegaAtual = setores.flatMap(setor => setor.pessoas).find(pessoa => pessoa.id === colega?.id) || colega
+  const grupoAtual = setores.find(setor => setor.id === grupo?.id) || grupo
+  const alvo = grupo ? `grupos/${grupo.id}/mensagens` : colega ? `mensagens/${colega.id}` : null
 
   useEffect(() => {
     const atualizar = () => leitura('/api/interno/setores').then(setSetores).catch(falha => setErro(falha.message))
@@ -38,9 +58,9 @@ export default function Interno({ me, abrirColegaId, onOpen }) {
   }, [])
 
   useEffect(() => {
-    if (!colega) return
+    if (!alvo) return
     setMensagens([]); setTemAnteriores(false); primeiroId.current = null; ultimoVisivel.current = null
-    const atualizar = () => leitura(`/api/interno/mensagens/${colega.id}`).then(novas => {
+    const atualizar = () => leitura(`/api/interno/${alvo}`).then(novas => {
       setMensagens(anteriores => {
         if (!anteriores.length) {
           setTemAnteriores(novas.length === 50)
@@ -54,7 +74,7 @@ export default function Interno({ me, abrirColegaId, onOpen }) {
     atualizar()
     const intervalo = setInterval(atualizar, 3000)
     return () => clearInterval(intervalo)
-  }, [colega?.id])
+  }, [alvo])
   useEffect(() => {
     const ultimo = mensagens.at(-1)?.id
     if (ultimo && ultimo !== ultimoVisivel.current) {
@@ -63,12 +83,12 @@ export default function Interno({ me, abrirColegaId, onOpen }) {
     }
   }, [mensagens.at(-1)?.id])
   async function carregarAnteriores() {
-    if (!colega || !temAnteriores || !primeiroId.current || carregando.current) return
+    if (!alvo || !temAnteriores || !primeiroId.current || carregando.current) return
     carregando.current = true
     const area = rolagem.current
     const altura = area?.scrollHeight || 0
     try {
-      const antigas = await leitura(`/api/interno/mensagens/${colega.id}?antes=${primeiroId.current}`)
+      const antigas = await leitura(`/api/interno/${alvo}?antes=${primeiroId.current}`)
       setTemAnteriores(antigas.length === 50)
       if (antigas.length) {
         primeiroId.current = antigas[0].id
@@ -89,6 +109,7 @@ export default function Interno({ me, abrirColegaId, onOpen }) {
     if (!abrirColegaId || !setores.length) return
     const pessoa = setores.flatMap(setor => setor.pessoas).find(item => item.id === abrirColegaId)
     if (pessoa) {
+      setGrupo(null)
       setColega(pessoa)
       const setor = setores.find(item => item.pessoas.some(usuario => usuario.id === pessoa.id))
       setAberto(setor?.id || null)
@@ -98,17 +119,36 @@ export default function Interno({ me, abrirColegaId, onOpen }) {
 
   async function enviar(evento) {
     evento.preventDefault()
-    if (!colega || !texto.trim() || enviando) return
+    if (!alvo || !texto.trim() || enviando) return
     setEnviando(true); setErro('')
     try {
-      const resposta = await fetch(`/api/interno/mensagens/${colega.id}`, {
+      const resposta = await fetch(`/api/interno/${alvo}`, {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
         body: new URLSearchParams({ texto: texto.trim() }),
       })
       if (!resposta.ok) throw new Error('Não foi possível enviar a mensagem.')
       setTexto('')
-      const novas = await leitura(`/api/interno/mensagens/${colega.id}`)
+      const novas = await leitura(`/api/interno/${alvo}`)
+      setMensagens(atuais => [...atuais, ...novas.filter(item => !atuais.some(atual => atual.id === item.id))].sort((a, b) => a.id - b.id))
+    } catch (falha) { setErro(falha.message) }
+    finally { setEnviando(false) }
+  }
+
+  async function enviarImagem() {
+    if (!alvo || !imagem || enviando) return
+    setEnviando(true); setErro('')
+    try {
+      const webp = await converterWebp(imagem)
+      const caminho = grupo ? `/api/interno/grupos/${grupo.id}/imagens` : `/api/interno/mensagens/${colega.id}/imagem`
+      const resposta = await fetch(caminho, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'image/webp' }, body: webp })
+      if (!resposta.ok) {
+        const detalhe = await resposta.json().catch(() => ({}))
+        throw new Error(detalhe.detail || 'Não foi possível enviar a imagem.')
+      }
+      setImagem(null)
+      if (arquivoInput.current) arquivoInput.current.value = ''
+      const novas = await leitura(`/api/interno/${alvo}`)
       setMensagens(atuais => [...atuais, ...novas.filter(item => !atuais.some(atual => atual.id === item.id))].sort((a, b) => a.id - b.id))
     } catch (falha) { setErro(falha.message) }
     finally { setEnviando(false) }
@@ -121,27 +161,32 @@ export default function Interno({ me, abrirColegaId, onOpen }) {
       <aside className="surface interno-directory"><h2>Setores</h2><p className="muted">Abra um setor para ver todos os usuários cadastrados.</p>
         {setores.map(setor => <div key={setor.id} className="interno-sector">
           <button className="interno-sector-button" onClick={() => setAberto(aberto === setor.id ? null : setor.id)} aria-expanded={aberto === setor.id}>
-            <span className="interno-sector-title"><span className="interno-sector-icon"><SetorIcon nome={setor.nome}/></span><span>{setor.nome}<small>{setor.pessoas.length} pessoas</small></span></span><span aria-hidden="true">{aberto === setor.id ? '▾' : '▸'}</span>
+            <span className="interno-sector-title"><span className="interno-sector-icon"><SetorIcon nome={setor.nome}/></span><span>{setor.nome}<small>{setor.total_pessoas} pessoas</small></span></span><span aria-hidden="true">{aberto === setor.id ? '▾' : '▸'}</span>
           </button>
-          {aberto === setor.id && <div className="interno-people">{setor.pessoas.length ? setor.pessoas.map(pessoa =>
-            <button key={pessoa.id} className={colega?.id === pessoa.id ? 'selected' : ''} disabled={!pessoa.ativo} onClick={() => { setColega(pessoa); setMensagens([]); setErro(''); onOpen(pessoa.id) }}>
+          {aberto === setor.id && <div className="interno-people">
+            {setor.grupo_ativo && <button className={grupo?.id === setor.id ? 'selected' : ''} onClick={() => { setGrupo(setor); setColega(null); setMensagens([]); setErro('') }}><span className="interno-sector-icon"><SetorIcon nome={setor.nome}/></span><span>Grupo · {setor.nome}<small>Todos os membros ativos</small></span></button>}
+            {setor.pessoas.length ? setor.pessoas.map(pessoa =>
+            <button key={pessoa.id} className={colega?.id === pessoa.id ? 'selected' : ''} disabled={!pessoa.ativo} onClick={() => { setGrupo(null); setColega(pessoa); setMensagens([]); setErro(''); onOpen(pessoa.id) }}>
               <span className={pessoa.ativo && pessoa.online ? 'status-dot' : 'status-dot status-dot-muted'} />
               <span>{pessoa.nome}<small>{!pessoa.ativo ? 'Inativo' : pessoa.online ? 'Online' : 'Offline'}</small></span>
             </button>) : <small>Nenhum usuário neste setor.</small>}</div>}
         </div>)}
       </aside>
       <section className="surface interno-chat">
-        {!colega ? <div className="chat-placeholder"><h2>Escolha um colega</h2><p>Abra um setor e selecione alguém da equipe.</p></div> : <>
-          <header><h2>{colega.nome}</h2><span className={colegaAtual?.online ? 'badge badge-open' : 'badge badge-closed'}>{colegaAtual?.online ? 'Online' : 'Offline'}</span></header>
+        {!alvo ? <div className="chat-placeholder"><h2>Escolha uma conversa</h2><p>Abra um setor e selecione o grupo ou alguém da equipe.</p></div> : <>
+          <header><h2>{grupo ? `Grupo · ${grupoAtual.nome}` : colega.nome}</h2>{grupo ? <span className="badge badge-open">Setor</span> : <span className={colegaAtual?.online ? 'badge badge-open' : 'badge badge-closed'}>{colegaAtual?.online ? 'Online' : 'Offline'}</span>}</header>
           <div className="interno-messages" ref={rolagem} onScroll={evento => { if (evento.currentTarget.scrollTop < 40) carregarAnteriores() }}>
             {temAnteriores && <button className="older-messages" onClick={carregarAnteriores}>Carregar mensagens anteriores</button>}
             {mensagens.length ? mensagens.map((mensagem, index) => <Fragment key={mensagem.id}>
             {(index === 0 || messageDay(mensagem.criada_em) !== messageDay(mensagens[index - 1].criada_em)) && <div className="day-divider"><span>{messageDay(mensagem.criada_em)}</span></div>}
             <div className={mensagem.remetente_id === me.id ? 'interno-message mine' : 'interno-message'}>
-              <strong>{mensagem.remetente_id === me.id ? 'Você' : colega.nome}</strong>
-              <p>{mensagem.texto}</p><time>{messageHour(mensagem.criada_em)}</time>
+              <strong>{mensagem.remetente_id === me.id ? 'Você' : grupo ? mensagem.remetente_nome : colega.nome}</strong>
+              {mensagem.texto && <p>{mensagem.texto}</p>}
+              {mensagem.imagem_url && <img className="interno-imagem" src={mensagem.imagem_url} alt="Imagem enviada no chat" loading="lazy" />}
+              <time>{messageHour(mensagem.criada_em)}</time>
             </div></Fragment>) : <p className="muted">Nenhuma mensagem nesta conversa.</p>}</div>
           <form onSubmit={enviar}><input value={texto} onChange={evento => setTexto(evento.target.value)} placeholder="Escreva uma mensagem interna..." maxLength="4000" required /><button className="button button-primary" disabled={enviando || !texto.trim()}>Enviar</button></form>
+          <div className="interno-image-controls"><label>Imagem <input ref={arquivoInput} type="file" accept="image/*" onChange={evento => setImagem(evento.target.files?.[0] || null)} /></label><button className="button button-soft" disabled={enviando || !imagem} onClick={enviarImagem}>Enviar imagem</button><small>Convertida para WebP antes do envio · até 2 MB</small></div>
         </>}
       </section>
     </div>

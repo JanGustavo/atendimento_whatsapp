@@ -6,7 +6,9 @@ export function messageDate(value) {
 
 export function messageDay(value) {
   const date = messageDate(value)
-  return date ? date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
+  return date
+    ? date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
+    : ''
 }
 
 export function messageHour(value) {

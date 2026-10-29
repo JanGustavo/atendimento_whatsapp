@@ -1,4 +1,5 @@
 """Mutações de atendimentos com isolamento no servidor."""
+
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -34,21 +35,36 @@ async def conversa_visivel(db: AsyncSession, conversa_id: int, user: UsuarioAtua
 
 
 @router.post("/{conversa_id}/leitura")
-async def marcar_leitura(conversa_id: int, db: AsyncSession = Depends(get_db),
-                        user: UsuarioAtual = Depends(get_current_user)):
+async def marcar_leitura(
+    conversa_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
     await conversa_visivel(db, conversa_id, user)
-    ultimo_id = (await db.execute(select(func.max(Mensagem.id)).where(
-        Mensagem.conversa_id == conversa_id, Mensagem.origem == "cliente"
-    ))).scalar() or 0
+    ultimo_id = (
+        await db.execute(
+            select(func.max(Mensagem.id)).where(
+                Mensagem.conversa_id == conversa_id, Mensagem.origem == "cliente"
+            )
+        )
+    ).scalar() or 0
     if ultimo_id:
         insercao = sqlite_insert(LeituraConversa).values(
-            conversa_id=conversa_id, usuario_id=user.user_id,
-            ultima_mensagem_id=ultimo_id, lida_em=now())
-        await db.execute(insercao.on_conflict_do_update(
-            index_elements=[LeituraConversa.conversa_id, LeituraConversa.usuario_id],
-            set_={"ultima_mensagem_id": ultimo_id, "lida_em": now()},
-            where=LeituraConversa.ultima_mensagem_id < ultimo_id,
-        ))
+            conversa_id=conversa_id,
+            usuario_id=user.user_id,
+            ultima_mensagem_id=ultimo_id,
+            lida_em=now(),
+        )
+        await db.execute(
+            insercao.on_conflict_do_update(
+                index_elements=[
+                    LeituraConversa.conversa_id,
+                    LeituraConversa.usuario_id,
+                ],
+                set_={"ultima_mensagem_id": ultimo_id, "lida_em": now()},
+                where=LeituraConversa.ultima_mensagem_id < ultimo_id,
+            )
+        )
         await db.commit()
     return {"ultima_mensagem_id": ultimo_id}
 
@@ -74,27 +90,51 @@ async def enviar(
     if resultado.rowcount != 1:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
-    mensagem = Mensagem(conversa_id=conversa.id, autor_id=user.user_id, origem="humano",
-                        texto=texto, envio_status="pendente", criada_em=now())
+    mensagem = Mensagem(
+        conversa_id=conversa.id,
+        autor_id=user.user_id,
+        origem="humano",
+        texto=texto,
+        envio_status="pendente",
+        criada_em=now(),
+    )
     db.add(mensagem)
     await db.flush()
-    papel = {"colaborador": "Atendente", "supervisor": "Supervisor", "gestor": "Gestor"}[user.role]
+    papel = {
+        "colaborador": "Atendente",
+        "supervisor": "Supervisor",
+        "gestor": "Gestor",
+    }[user.role]
     texto_cliente = f"*{papel} {user.nome}*\n{texto}"
     try:
-        mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(conversa.numero, texto_cliente)
+        mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(
+            conversa.numero, texto_cliente
+        )
     except MetaTokenExpirado:
         mensagem.envio_status = "falhou"
         await db.commit()
-        raise HTTPException(status_code=502, detail="O token da Meta expirou. Avise o gestor para atualizar a conexão antes de enviar novamente.")
+        raise HTTPException(
+            status_code=502,
+            detail="O token da Meta expirou. Avise o gestor para atualizar a conexão antes de enviar novamente.",
+        )
     except Exception:
         mensagem.envio_status = "falhou"
         await db.commit()
-        raise HTTPException(status_code=502, detail="Envio ao WhatsApp falhou. A mensagem ficou marcada como falhou; tente enviá-la novamente.")
+        raise HTTPException(
+            status_code=502,
+            detail="Envio ao WhatsApp falhou. A mensagem ficou marcada como falhou; tente enviá-la novamente.",
+        )
     mensagem.envio_status = "enviada"
     if user.role == "colaborador":
-        await db.execute(update(Conversa).where(*condicoes).values(
-            primeira_resposta_em=func.coalesce(Conversa.primeira_resposta_em, now()),
-            timer_prazo_em=None, etapa="atribuida"))
+        await db.execute(
+            update(Conversa)
+            .where(*condicoes)
+            .values(
+                primeira_resposta_em=func.coalesce(Conversa.primeira_resposta_em, now()),
+                timer_prazo_em=None,
+                etapa="atribuida",
+            )
+        )
     await db.commit()
     return {"id": mensagem.id, "envio_status": mensagem.envio_status}
 
@@ -109,10 +149,16 @@ async def reenviar(
     conversa = await conversa_visivel(db, conversa_id, user)
     if conversa.status != "aberta":
         raise HTTPException(status_code=409, detail="Conversa encerrada")
-    mensagem = (await db.execute(select(Mensagem).where(
-        Mensagem.id == mensagem_id, Mensagem.conversa_id == conversa_id,
-        Mensagem.origem == "humano", Mensagem.autor_id == user.user_id,
-    ))).scalar_one_or_none()
+    mensagem = (
+        await db.execute(
+            select(Mensagem).where(
+                Mensagem.id == mensagem_id,
+                Mensagem.conversa_id == conversa_id,
+                Mensagem.origem == "humano",
+                Mensagem.autor_id == user.user_id,
+            )
+        )
+    ).scalar_one_or_none()
     if mensagem is None:
         raise HTTPException(status_code=404, detail="Mensagem não encontrada")
     condicoes = [Conversa.id == conversa_id, Conversa.status == "aberta"]
@@ -122,29 +168,51 @@ async def reenviar(
     if bloqueio.rowcount != 1:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
-    reserva = await db.execute(update(Mensagem).where(
-        Mensagem.id == mensagem_id, Mensagem.envio_status == "falhou",
-    ).values(envio_status="pendente"))
+    reserva = await db.execute(
+        update(Mensagem)
+        .where(
+            Mensagem.id == mensagem_id,
+            Mensagem.envio_status == "falhou",
+        )
+        .values(envio_status="pendente")
+    )
     if reserva.rowcount != 1:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Esta mensagem não está pendente de reenvio")
-    papel = {"colaborador": "Atendente", "supervisor": "Supervisor", "gestor": "Gestor"}[user.role]
+    papel = {
+        "colaborador": "Atendente",
+        "supervisor": "Supervisor",
+        "gestor": "Gestor",
+    }[user.role]
     try:
         mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(
-            conversa.numero, f"*{papel} {user.nome}*\n{mensagem.texto}")
+            conversa.numero, f"*{papel} {user.nome}*\n{mensagem.texto}"
+        )
     except MetaTokenExpirado:
         mensagem.envio_status = "falhou"
         await db.commit()
-        raise HTTPException(status_code=502, detail="O token da Meta expirou. Avise o gestor para atualizar a conexão antes de reenviar.")
+        raise HTTPException(
+            status_code=502,
+            detail="O token da Meta expirou. Avise o gestor para atualizar a conexão antes de reenviar.",
+        )
     except Exception:
         mensagem.envio_status = "falhou"
         await db.commit()
-        raise HTTPException(status_code=502, detail="Reenvio ao WhatsApp falhou. A mensagem continua marcada como falhou.")
+        raise HTTPException(
+            status_code=502,
+            detail="Reenvio ao WhatsApp falhou. A mensagem continua marcada como falhou.",
+        )
     mensagem.envio_status = "enviada"
     if user.role == "colaborador":
-        await db.execute(update(Conversa).where(*condicoes).values(
-            primeira_resposta_em=func.coalesce(Conversa.primeira_resposta_em, now()),
-            timer_prazo_em=None, etapa="atribuida"))
+        await db.execute(
+            update(Conversa)
+            .where(*condicoes)
+            .values(
+                primeira_resposta_em=func.coalesce(Conversa.primeira_resposta_em, now()),
+                timer_prazo_em=None,
+                etapa="atribuida",
+            )
+        )
     await db.commit()
     return {"id": mensagem.id, "envio_status": mensagem.envio_status}
 
@@ -167,7 +235,12 @@ async def transferir_atendimento(
         if setor is None:
             raise HTTPException(status_code=422, detail="Setor de vendas indisponível")
         alvo = await db.get(Usuario, int(destino[9:]))
-        if alvo is None or alvo.role != "colaborador" or alvo.setor_interno_id != 1 or not alvo.ativo:
+        if (
+            alvo is None
+            or alvo.role != "colaborador"
+            or alvo.setor_interno_id != 1
+            or not alvo.ativo
+        ):
             raise HTTPException(status_code=422, detail="Vendedor inválido")
     elif destino.startswith("setor:") and destino[6:].isdecimal():
         setor = await db.get(Setor, int(destino[6:]))
@@ -185,31 +258,62 @@ async def transferir_atendimento(
     novo_setor_id = setor.id if setor else conversa.setor_id
     vendas = setor.ordem == 1
     prazo = instante + timedelta(seconds=get_settings().timer_espera_segundos) if vendas else None
-    condicoes = [Conversa.id == conversa.id, Conversa.status == "aberta", Conversa.atribuido_id == antigo_id]
-    resultado = await db.execute(update(Conversa).where(*condicoes).values(
-        atribuido_id=alvo.id, setor_id=novo_setor_id, etapa="atribuida", primeira_resposta_em=None,
-        timer_inicio_em=instante if vendas else None, timer_prazo_em=prazo,
-        timer_aviso_em=None, timer_extensoes=0, tentativas_timer=1 if vendas else 0,
-    ))
+    condicoes = [
+        Conversa.id == conversa.id,
+        Conversa.status == "aberta",
+        Conversa.atribuido_id == antigo_id,
+    ]
+    resultado = await db.execute(
+        update(Conversa)
+        .where(*condicoes)
+        .values(
+            atribuido_id=alvo.id,
+            setor_id=novo_setor_id,
+            etapa="atribuida",
+            primeira_resposta_em=None,
+            timer_inicio_em=instante if vendas else None,
+            timer_prazo_em=prazo,
+            timer_aviso_em=None,
+            timer_extensoes=0,
+            tentativas_timer=1 if vendas else 0,
+        )
+    )
     if resultado.rowcount != 1:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Conversa já transferida")
-    db.add(Atribuicao(conversa_id=conversa.id, de_usuario_id=antigo_id,
-                      para_usuario_id=alvo.id, motivo="atendente", criada_em=instante))
+    db.add(
+        Atribuicao(
+            conversa_id=conversa.id,
+            de_usuario_id=antigo_id,
+            para_usuario_id=alvo.id,
+            motivo="atendente",
+            criada_em=instante,
+        )
+    )
     alvo.ultima_atribuicao_em = instante
     config = get_settings()
     if config.aviso_transferencia_ativo:
         aviso = config.aviso_transferencia_texto.replace("{nome}", alvo.nome)
-        mensagem = Mensagem(conversa_id=conversa.id, origem="bot", texto=aviso,
-                            envio_status="pendente", criada_em=instante)
+        mensagem = Mensagem(
+            conversa_id=conversa.id,
+            origem="bot",
+            texto=aviso,
+            envio_status="pendente",
+            criada_em=instante,
+        )
         db.add(mensagem)
         await db.flush()
         try:
-            mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(conversa.numero, aviso)
+            mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(
+                conversa.numero, aviso
+            )
         except Exception:
             mensagem.envio_status = "falhou"
             await db.commit()
-            raise HTTPException(status_code=502, detail="Transferência salva, mas o aviso ao cliente falhou.")
+            raise HTTPException(
+                status_code=502,
+                detail="Transferência salva, mas o aviso ao cliente falhou.",
+            )
         mensagem.envio_status = "enviada"
     await db.commit()
     return {"ok": True}
@@ -225,8 +329,11 @@ async def encerrar(
     condicoes = [Conversa.id == conversa.id, Conversa.status == "aberta"]
     if user.role != "gestor":
         condicoes.append(Conversa.atribuido_id == user.user_id)
-    resultado = await db.execute(update(Conversa).where(*condicoes).values(
-        status="encerrada", etapa="encerrada", timer_prazo_em=None))
+    resultado = await db.execute(
+        update(Conversa)
+        .where(*condicoes)
+        .values(status="encerrada", etapa="encerrada", timer_prazo_em=None)
+    )
     if resultado.rowcount != 1:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Conversa não encontrada")

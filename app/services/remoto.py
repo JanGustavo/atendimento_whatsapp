@@ -1,4 +1,5 @@
 """Contrato único do acesso remoto; MeshCentral poderá implementá-lo depois."""
+
 from typing import Protocol
 
 from app.models import Computador

@@ -1,4 +1,5 @@
 """Tipos base e protocolo do provider WhatsApp."""
+
 from dataclasses import dataclass
 from typing import Protocol
 

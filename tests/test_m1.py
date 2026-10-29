@@ -27,11 +27,17 @@ async def test_isolamento_lista_detalhe_envio_e_busca_por_id(ambiente):
     busca = await client.get("/api/atendimentos?q=551100002")
     assert busca.json() == []
     assert (await client.get("/api/atendimentos/11")).status_code == 404
-    assert (await client.post("/api/atendimentos/11/mensagens", data={"texto": "Oi"})).status_code == 404
+    assert (
+        await client.post("/api/atendimentos/11/mensagens", data={"texto": "Oi"})
+    ).status_code == 404
     assert (await client.get("/api/atendimentos/10")).status_code == 200
-    assert (await client.post("/api/atendimentos/10/mensagens", data={"texto": "Olá"})).status_code == 200
+    assert (
+        await client.post("/api/atendimentos/10/mensagens", data={"texto": "Olá"})
+    ).status_code == 200
     async with maker() as db:
-        mensagens = (await db.execute(select(Mensagem).where(Mensagem.conversa_id == 10))).scalars().all()
+        mensagens = (
+            (await db.execute(select(Mensagem).where(Mensagem.conversa_id == 10))).scalars().all()
+        )
         assert len(mensagens) == 1 and mensagens[0].autor_id == 2
         conversa = await db.get(Conversa, 10)
         assert conversa.primeira_resposta_em is not None
@@ -45,7 +51,11 @@ async def test_gestor_transfere_e_registra_historico(ambiente):
     assert resposta.status_code == 200
     async with maker() as db:
         conversa = await db.get(Conversa, 10)
-        historico = (await db.execute(select(Atribuicao).where(Atribuicao.conversa_id == 10))).scalars().all()
+        historico = (
+            (await db.execute(select(Atribuicao).where(Atribuicao.conversa_id == 10)))
+            .scalars()
+            .all()
+        )
         assert conversa.atribuido_id == 3
         assert [(item.de_usuario_id, item.para_usuario_id) for item in historico] == [(2, 3)]
     await entrar(client, "a@teste.local")

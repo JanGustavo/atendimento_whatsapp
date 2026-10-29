@@ -1,4 +1,5 @@
 """Autenticação do painel React com cookie HttpOnly."""
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -6,10 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import form
 from app.api.deps import UsuarioAtual, get_current_user
-from app.core.database import get_db
 from app.core.config import get_settings
+from app.core.database import get_db
 from app.models import Usuario
-from app.services.auth_service import create_access_token, get_password_hash, verify_password
+from app.services.auth_service import (
+    create_access_token,
+    get_password_hash,
+    verify_password,
+)
 
 router = APIRouter(prefix="/api/auth")
 
@@ -19,7 +24,11 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
     dados = await form(request)
     email = dados.get("email", "").strip().lower()
     usuario = (await db.execute(select(Usuario).where(Usuario.email == email))).scalar_one_or_none()
-    if usuario is None or not usuario.ativo or not verify_password(dados.get("senha", ""), usuario.senha_hash):
+    if (
+        usuario is None
+        or not usuario.ativo
+        or not verify_password(dados.get("senha", ""), usuario.senha_hash)
+    ):
         raise HTTPException(status_code=401, detail="Email ou senha inválidos")
     resposta = JSONResponse({"id": usuario.id, "nome": usuario.nome, "role": usuario.role})
     resposta.set_cookie(
@@ -27,7 +36,8 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
         create_access_token(usuario.id, usuario.role),
         httponly=True,
         samesite="lax",
-        secure=request.url.scheme == "https" or request.url.hostname == get_settings().panel_https_host,
+        secure=request.url.scheme == "https"
+        or request.url.hostname == get_settings().panel_https_host,
     )
     return resposta
 
@@ -40,8 +50,11 @@ async def sair():
 
 
 @router.post("/senha")
-async def alterar_senha(request: Request, db: AsyncSession = Depends(get_db),
-                       atual: UsuarioAtual = Depends(get_current_user)):
+async def alterar_senha(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    atual: UsuarioAtual = Depends(get_current_user),
+):
     dados = await form(request)
     usuario = await db.get(Usuario, atual.user_id)
     senha_nova = dados.get("senha_nova", "")

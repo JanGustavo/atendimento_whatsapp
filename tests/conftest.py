@@ -33,29 +33,109 @@ async def ambiente():
     app.dependency_overrides[get_db] = database_override
     async with maker() as db:
         db.add(SimuladorEstado(id=1, ativo=True))
-        db.add_all([
-            SetorInterno(id=1, nome="Vendas"), SetorInterno(id=2, nome="Estoque"),
-            SetorInterno(id=3, nome="Garantia"), SetorInterno(id=4, nome="Administração"),
-        ])
+        db.add_all(
+            [
+                SetorInterno(id=1, nome="Vendas"),
+                SetorInterno(id=2, nome="Estoque"),
+                SetorInterno(id=3, nome="Garantia"),
+                SetorInterno(id=4, nome="Administração"),
+            ]
+        )
         await db.flush()
-        db.add_all([
-            Usuario(id=1, nome="Gestor", email="gestor@teste.local", senha_hash=get_password_hash("senha12345"), role="gestor", ativo=True, online=True, setor_interno_id=4),
-            Usuario(id=2, nome="Vendedor A", email="a@teste.local", senha_hash=get_password_hash("senha12345"), role="colaborador", ativo=True, online=True, setor_interno_id=1),
-            Usuario(id=3, nome="Vendedor B", email="b@teste.local", senha_hash=get_password_hash("senha12345"), role="colaborador", ativo=True, online=True, setor_interno_id=1),
-            Usuario(id=4, nome="Responsável", email="r@teste.local", senha_hash=get_password_hash("senha12345"), role="supervisor", ativo=True, online=True, setor_interno_id=2),
-            Usuario(id=5, nome="Vendedor C", email="c@teste.local", senha_hash=get_password_hash("senha12345"), role="colaborador", ativo=True, online=True, setor_interno_id=1),
-            Usuario(id=6, nome="Responsável 2", email="r2@teste.local", senha_hash=get_password_hash("senha12345"), role="supervisor", ativo=True, online=True, setor_interno_id=3),
-        ])
-        db.add_all([
-            Setor(id=1, nome="Vendas/Compra", ordem=1),
-            Setor(id=2, nome="Devolução", ordem=2, responsavel_id=4),
-            Setor(id=3, nome="Garantia", ordem=3, responsavel_id=6),
-            Setor(id=4, nome="Outro", ordem=4, responsavel_id=4),
-        ])
-        db.add_all([
-            Conversa(id=10, numero="551100001", setor_id=1, atribuido_id=2, status="aberta", etapa="atribuida", timer_extensoes=0),
-            Conversa(id=11, numero="551100002", setor_id=1, atribuido_id=3, status="aberta", etapa="atribuida", timer_extensoes=0),
-        ])
+        db.add_all(
+            [
+                Usuario(
+                    id=1,
+                    nome="Gestor",
+                    email="gestor@teste.local",
+                    senha_hash=get_password_hash("senha12345"),
+                    role="gestor",
+                    ativo=True,
+                    online=True,
+                    setor_interno_id=4,
+                ),
+                Usuario(
+                    id=2,
+                    nome="Vendedor A",
+                    email="a@teste.local",
+                    senha_hash=get_password_hash("senha12345"),
+                    role="colaborador",
+                    ativo=True,
+                    online=True,
+                    setor_interno_id=1,
+                ),
+                Usuario(
+                    id=3,
+                    nome="Vendedor B",
+                    email="b@teste.local",
+                    senha_hash=get_password_hash("senha12345"),
+                    role="colaborador",
+                    ativo=True,
+                    online=True,
+                    setor_interno_id=1,
+                ),
+                Usuario(
+                    id=4,
+                    nome="Responsável",
+                    email="r@teste.local",
+                    senha_hash=get_password_hash("senha12345"),
+                    role="supervisor",
+                    ativo=True,
+                    online=True,
+                    setor_interno_id=2,
+                ),
+                Usuario(
+                    id=5,
+                    nome="Vendedor C",
+                    email="c@teste.local",
+                    senha_hash=get_password_hash("senha12345"),
+                    role="colaborador",
+                    ativo=True,
+                    online=True,
+                    setor_interno_id=1,
+                ),
+                Usuario(
+                    id=6,
+                    nome="Responsável 2",
+                    email="r2@teste.local",
+                    senha_hash=get_password_hash("senha12345"),
+                    role="supervisor",
+                    ativo=True,
+                    online=True,
+                    setor_interno_id=3,
+                ),
+            ]
+        )
+        db.add_all(
+            [
+                Setor(id=1, nome="Vendas/Compra", ordem=1),
+                Setor(id=2, nome="Devolução", ordem=2, responsavel_id=4),
+                Setor(id=3, nome="Garantia", ordem=3, responsavel_id=6),
+                Setor(id=4, nome="Outro", ordem=4, responsavel_id=4),
+            ]
+        )
+        db.add_all(
+            [
+                Conversa(
+                    id=10,
+                    numero="551100001",
+                    setor_id=1,
+                    atribuido_id=2,
+                    status="aberta",
+                    etapa="atribuida",
+                    timer_extensoes=0,
+                ),
+                Conversa(
+                    id=11,
+                    numero="551100002",
+                    setor_id=1,
+                    atribuido_id=3,
+                    status="aberta",
+                    etapa="atribuida",
+                    timer_extensoes=0,
+                ),
+            ]
+        )
         await db.commit()
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

@@ -1,4 +1,5 @@
 """Provider simulado para testes locais sem WhatsApp real."""
+
 from app.providers.base import MensagemEntrada, WhatsAppProvider  # noqa: F401
 
 # Clientes fictícios usados pelo simulador de conversas

@@ -1,5 +1,7 @@
 """Leitura simples de formulários URL-encoded enviados pelo React."""
+
 from urllib.parse import parse_qs
+
 
 async def form(request) -> dict[str, str]:
     body = (await request.body()).decode("utf-8")

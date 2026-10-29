@@ -1,4 +1,5 @@
 """Utilitários compartilhados pelo núcleo da aplicação."""
+
 from datetime import UTC, datetime
 
 

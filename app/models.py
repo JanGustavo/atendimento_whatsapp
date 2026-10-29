@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -65,7 +75,14 @@ class SimuladorEstado(Base):
 
 class Conversa(Base):
     __tablename__ = "conversas"
-    __table_args__ = (Index("uq_conversa_aberta_numero", "numero", unique=True, sqlite_where=text("status = 'aberta'")),)
+    __table_args__ = (
+        Index(
+            "uq_conversa_aberta_numero",
+            "numero",
+            unique=True,
+            sqlite_where=text("status = 'aberta'"),
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     numero: Mapped[str] = mapped_column(String(30), index=True)
     setor_id: Mapped[int | None] = mapped_column(ForeignKey("setores.id"))
@@ -98,7 +115,9 @@ class Mensagem(Base):
 
 class LeituraConversa(Base):
     __tablename__ = "leituras_conversas"
-    __table_args__ = (Index("uq_leitura_conversa_usuario", "conversa_id", "usuario_id", unique=True),)
+    __table_args__ = (
+        Index("uq_leitura_conversa_usuario", "conversa_id", "usuario_id", unique=True),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     conversa_id: Mapped[int] = mapped_column(ForeignKey("conversas.id"), index=True)
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)

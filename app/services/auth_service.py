@@ -19,7 +19,11 @@ def get_password_hash(password: str) -> str:
 def create_access_token(user_id: int, role: str) -> str:
     settings = get_settings()
     expire = datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes)
-    return jwt.encode({"sub": str(user_id), "role": role, "exp": expire}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(
+        {"sub": str(user_id), "role": role, "exp": expire},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
 
 
 def decode_token(token: str) -> tuple[int, str] | None:
@@ -27,7 +31,11 @@ def decode_token(token: str) -> tuple[int, str] | None:
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
         user_id, role = payload.get("sub"), payload.get("role")
-        if not isinstance(user_id, str) or not user_id.isdecimal() or role not in {"colaborador", "supervisor", "gestor"}:
+        if (
+            not isinstance(user_id, str)
+            or not user_id.isdecimal()
+            or role not in {"colaborador", "supervisor", "gestor"}
+        ):
             return None
         return int(user_id), role
     except JWTError:

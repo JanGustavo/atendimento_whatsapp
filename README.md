@@ -17,6 +17,15 @@ O painel está publicado em [https://painel.jangustavo.me](https://painel.jangus
 
 O painel e o formulário de chamados usam React. A API JSON fica em `/api`; os testes rodam com `pytest tests/ -v` em um ambiente Python com as dependências de desenvolvimento instaladas.
 
+## Lint e Formatação
+
+- **Backend (Python):** Usando [Ruff](https://docs.astral.sh/ruff/) para lint e formatação.
+  - Verificar: `ruff check app tests` e `ruff format --check app tests`
+  - Formatar/corrigir: `ruff check --fix app tests` e `ruff format app tests`
+- **Frontend (JavaScript/React):** Usando [Biome](https://biomejs.dev/) para lint e formatação.
+  - Verificar: `npm run lint` (dentro de `frontend/`)
+  - Formatar: `npm run format` (dentro de `frontend/`)
+
 ## Equipes e imagens internas
 
 O gestor cria equipes internas em **Visão do gestor → Setores** e vincula usuários em **Equipe**. Um grupo de chat aparece automaticamente para os membros quando há pelo menos dois usuários ativos no setor. Mensagens do grupo e conversas individuais são privadas para seus participantes.

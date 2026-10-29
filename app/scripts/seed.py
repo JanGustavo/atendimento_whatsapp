@@ -26,21 +26,51 @@ async def seed():
         ("Responsável 2", "responsavel2@demo.local", "supervisor"),
     ]
     async with async_session_maker() as db:
-        for identificador, nome in [(1, "Vendas"), (2, "Estoque"), (3, "Garantia"), (4, "Administração")]:
+        for identificador, nome in [
+            (1, "Vendas"),
+            (2, "Estoque"),
+            (3, "Garantia"),
+            (4, "Administração"),
+        ]:
             if not await db.get(SetorInterno, identificador):
                 db.add(SetorInterno(id=identificador, nome=nome))
         await db.flush()
         for nome, email, role in pessoas:
             if not (await db.execute(select(Usuario.id).where(Usuario.email == email))).first():
                 setor_interno_id = {"colaborador": 1, "supervisor": 3, "gestor": 4}[role]
-                db.add(Usuario(nome=nome, email=email, role=role, senha_hash=get_password_hash(passwords[role]), ativo=True, online=True, setor_interno_id=setor_interno_id))
+                db.add(
+                    Usuario(
+                        nome=nome,
+                        email=email,
+                        role=role,
+                        senha_hash=get_password_hash(passwords[role]),
+                        ativo=True,
+                        online=True,
+                        setor_interno_id=setor_interno_id,
+                    )
+                )
         await db.flush()
-        responsaveis = (await db.execute(select(Usuario).where(Usuario.role == "supervisor").order_by(Usuario.id))).scalars().all()
-        setores = [(1, "Vendas/Compra", None), (2, "Devolução", responsaveis[0].id), (3, "Garantia", responsaveis[1].id), (4, "Outro", responsaveis[0].id)]
+        responsaveis = (
+            (
+                await db.execute(
+                    select(Usuario).where(Usuario.role == "supervisor").order_by(Usuario.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        setores = [
+            (1, "Vendas/Compra", None),
+            (2, "Devolução", responsaveis[0].id),
+            (3, "Garantia", responsaveis[1].id),
+            (4, "Outro", responsaveis[0].id),
+        ]
         for ordem, nome, responsavel_id in setores:
             if not (await db.execute(select(Setor.id).where(Setor.ordem == ordem))).first():
                 db.add(Setor(ordem=ordem, nome=nome, responsavel_id=responsavel_id))
-        usuarios = {item.email: item for item in (await db.execute(select(Usuario))).scalars().all()}
+        usuarios = {
+            item.email: item for item in (await db.execute(select(Usuario))).scalars().all()
+        }
         computadores = [
             ("PC Vendedor 1", "vendedor1@demo.local", "empresa"),
             ("PC Vendedor 2", "vendedor2@demo.local", "empresa"),

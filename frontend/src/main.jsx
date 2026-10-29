@@ -5,5 +5,7 @@ import ChamadoPublico from './ChamadoPublico.jsx'
 import './styles.css'
 
 createRoot(document.getElementById('root')).render(
-  <React.StrictMode>{window.location.pathname === '/chamado' ? <ChamadoPublico /> : <App />}</React.StrictMode>,
+  <React.StrictMode>
+    {window.location.pathname === '/chamado' ? <ChamadoPublico /> : <App />}
+  </React.StrictMode>,
 )

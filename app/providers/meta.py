@@ -1,4 +1,5 @@
 """WhatsApp Cloud API oficial da Meta; apenas mensagens de texto saem daqui."""
+
 import httpx
 
 from app.providers.base import MensagemEntrada
@@ -24,8 +25,14 @@ class MetaProvider:
 
     @property
     def _url(self) -> str:
-        if not self.graph_version.startswith("v") or not self.phone_number_id.isdigit() or not self.access_token:
-            raise ValueError("Configure META_GRAPH_VERSION, META_PHONE_NUMBER_ID e META_ACCESS_TOKEN")
+        if (
+            not self.graph_version.startswith("v")
+            or not self.phone_number_id.isdigit()
+            or not self.access_token
+        ):
+            raise ValueError(
+                "Configure META_GRAPH_VERSION, META_PHONE_NUMBER_ID e META_ACCESS_TOKEN"
+            )
         return f"https://graph.facebook.com/{self.graph_version}/{self.phone_number_id}"
 
     async def enviar_texto(self, numero: str, texto: str) -> str:
@@ -40,8 +47,13 @@ class MetaProvider:
             resposta = await client.post(
                 f"{self._url}/messages",
                 headers={"Authorization": f"Bearer {self.access_token}"},
-                json={"messaging_product": "whatsapp", "recipient_type": "individual",
-                      "to": numero, "type": "text", "text": {"body": texto}},
+                json={
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": numero,
+                    "type": "text",
+                    "text": {"body": texto},
+                },
             )
             if _token_expirado(resposta):
                 raise MetaTokenExpirado("Token de acesso da Meta expirou")
@@ -71,7 +83,11 @@ class MetaProvider:
                 if numero_destino and numero_destino != self.phone_number_id:
                     continue
                 for status in valor.get("statuses") or []:
-                    if isinstance(status, dict) and status.get("id") and status.get("status") in {"sent", "delivered", "read", "failed"}:
+                    if (
+                        isinstance(status, dict)
+                        and status.get("id")
+                        and status.get("status") in {"sent", "delivered", "read", "failed"}
+                    ):
                         resultados.append(status)
         return resultados
 
@@ -107,7 +123,9 @@ class MetaProvider:
                             continue
                         entradas.append(MensagemEntrada(identidade, numero, texto))
                     elif tipo:
-                        entradas.append(MensagemEntrada(identidade, numero, "[Mídia recebida]", tipo="midia"))
+                        entradas.append(
+                            MensagemEntrada(identidade, numero, "[Mídia recebida]", tipo="midia")
+                        )
         return entradas
 
     def parse_webhook(self, payload: dict) -> MensagemEntrada | None:
@@ -117,7 +135,9 @@ class MetaProvider:
     async def status(self) -> str:
         try:
             async with httpx.AsyncClient(timeout=3) as client:
-                resposta = await client.get(self._url, headers={"Authorization": f"Bearer {self.access_token}"})
+                resposta = await client.get(
+                    self._url, headers={"Authorization": f"Bearer {self.access_token}"}
+                )
                 if _token_expirado(resposta):
                     return "token expirado"
                 resposta.raise_for_status()

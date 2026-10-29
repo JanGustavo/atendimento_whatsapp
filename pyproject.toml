@@ -9,7 +9,11 @@ dependencies = [
   "python-jose[cryptography]==3.3.0", "passlib[bcrypt]==1.7.4", "bcrypt==4.0.1",
 ]
 [project.optional-dependencies]
-dev = ["pytest==8.3.4", "pytest-asyncio==0.23.7"]
+dev = [
+  "pytest==8.3.4",
+  "pytest-asyncio==0.23.7",
+  "ruff>=0.8.0",
+]
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -18,3 +22,26 @@ include = ["app*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle erros
+  "W",   # pycodestyle avisos
+  "F",   # pyflakes
+  "I",   # isort
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+]
+ignore = [
+  "B008", # FastAPI Depends em defaults de rota
+  "B904", # raise ... from err em rotas FastAPI
+  "E501", # tamanho de linha (deixado para o formatador)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

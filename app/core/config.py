@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     expediente_inicio: str = "07:00"
     expediente_fim: str = "18:30"
     expediente_fuso: str = "America/Sao_Paulo"
-    mensagem_fora_expediente: str = "Estamos fora do horário de atendimento. Voltaremos no próximo expediente."
+    mensagem_fora_expediente: str = (
+        "Estamos fora do horário de atendimento. Voltaremos no próximo expediente."
+    )
     mensagem_reabertura: str = "Estamos de volta. Vamos iniciar seu atendimento."
     mensagem_standby: str = "Ainda não conseguimos um atendente. Seu pedido ficou em espera; nossa equipe responderá assim que possível."
     seed_gestor_password: str = ""

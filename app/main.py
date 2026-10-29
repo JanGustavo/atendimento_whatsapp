@@ -7,17 +7,17 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.auth import router as auth_router
 from app.api.atendimentos import router as atendimentos_router
-from app.api.gestor import router as gestor_router
+from app.api.auth import router as auth_router
 from app.api.chamados import router as chamados_router
-from app.api.webhook import router as webhook_router
-from app.api.frontend import router as frontend_router
-from app.api.simulador import router as simulador_router
-from app.api.interno import router as interno_router
 from app.api.eventos import router as eventos_router
-from app.core.database import async_session_maker
+from app.api.frontend import router as frontend_router
+from app.api.gestor import router as gestor_router
+from app.api.interno import router as interno_router
+from app.api.simulador import router as simulador_router
+from app.api.webhook import router as webhook_router
 from app.core.config import get_settings
+from app.core.database import async_session_maker
 from app.providers import provider_atual
 from app.services.atendimento import verificar_timers
 
@@ -51,11 +51,17 @@ app = FastAPI(title="Atendimento WhatsApp — Alpha", lifespan=lifespan)
 @app.middleware("http")
 async def exigir_origem_do_painel_https(request: Request, call_next):
     host = get_settings().panel_https_host
-    if (host and request.url.hostname == host and request.method in {"POST", "PUT", "PATCH", "DELETE"}
-            and request.url.path.startswith("/api/")
-            and request.headers.get("origin") != f"https://{host}"):
+    if (
+        host
+        and request.url.hostname == host
+        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.url.path.startswith("/api/")
+        and request.headers.get("origin") != f"https://{host}"
+    ):
         return JSONResponse({"detail": "Origem inválida"}, status_code=403)
     return await call_next(request)
+
+
 web_dir = Path(__file__).resolve().parent / "web"
 if not web_dir.exists():
     web_dir = Path(__file__).resolve().parents[1] / "frontend" / "dist"
@@ -102,7 +108,11 @@ async def health():
     return {"status": "ok"}
 
 
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+@app.api_route(
+    "/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    include_in_schema=False,
+)
 async def pagina_react(path: str, request: Request):
     if request.method != "GET" or path.startswith(("api/", "webhook/", "static/", "assets/")):
         raise HTTPException(status_code=404)

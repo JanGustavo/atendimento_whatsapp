@@ -1,12 +1,16 @@
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
+from test_m1 import entrar
 
 from app.models import Atribuicao, Conversa, Mensagem, Usuario
 from app.providers import MensagemEntrada, simulador_provider
-from app.services.atendimento import proximo_disponivel, receber_mensagem, verificar_timers
+from app.services.atendimento import (
+    proximo_disponivel,
+    receber_mensagem,
+    verificar_timers,
+)
 from app.services.chatbot import MENU_SETOR, processar_mensagem
-from test_m1 import entrar
 
 BASE = datetime(2026, 10, 26, 12, 0, 0)
 
@@ -23,9 +27,27 @@ async def timer(maker):
 
 async def dados(maker, numero):
     async with maker() as db:
-        conversa = (await db.execute(select(Conversa).where(Conversa.numero == numero))).scalar_one()
-        mensagens = list((await db.execute(select(Mensagem).where(Mensagem.conversa_id == conversa.id).order_by(Mensagem.id))).scalars())
-        atribuicoes = list((await db.execute(select(Atribuicao).where(Atribuicao.conversa_id == conversa.id).order_by(Atribuicao.id))).scalars())
+        conversa = (
+            await db.execute(select(Conversa).where(Conversa.numero == numero))
+        ).scalar_one()
+        mensagens = list(
+            (
+                await db.execute(
+                    select(Mensagem)
+                    .where(Mensagem.conversa_id == conversa.id)
+                    .order_by(Mensagem.id)
+                )
+            ).scalars()
+        )
+        atribuicoes = list(
+            (
+                await db.execute(
+                    select(Atribuicao)
+                    .where(Atribuicao.conversa_id == conversa.id)
+                    .order_by(Atribuicao.id)
+                )
+            ).scalars()
+        )
         return conversa, mensagens, atribuicoes
 
 
@@ -63,7 +85,16 @@ async def test_opcao_zero_escolhe_menos_conversas_e_historico_original(ambiente,
 async def test_desempate_por_ultima_atribuicao_e_somente_online(ambiente):
     _, maker = ambiente
     async with maker() as db:
-        db.add(Conversa(numero="5511777000", setor_id=1, atribuido_id=5, status="aberta", etapa="atribuida", timer_extensoes=0))
+        db.add(
+            Conversa(
+                numero="5511777000",
+                setor_id=1,
+                atribuido_id=5,
+                status="aberta",
+                etapa="atribuida",
+                timer_extensoes=0,
+            )
+        )
         for usuario_id, segundos in [(2, 20), (3, 0), (5, 10)]:
             usuario = await db.get(Usuario, usuario_id)
             usuario.ultima_atribuicao_em = BASE + timedelta(seconds=segundos)
@@ -99,7 +130,9 @@ async def test_timer_avisa_em_90_e_transfere_em_150(ambiente, monkeypatch):
     conversa, mensagens, atribuicoes = await dados(maker, "5511888003")
     assert conversa.atribuido_id == 5
     assert [(a.de_usuario_id, a.para_usuario_id, a.motivo) for a in atribuicoes] == [
-        (None, 2, "escolha_cliente"), (2, 5, "timer")]
+        (None, 2, "escolha_cliente"),
+        (2, 5, "timer"),
+    ]
     assert "Vendedor C" in mensagens[-1].texto
 
 
@@ -130,7 +163,9 @@ async def test_cliente_estende_ate_210_segundos(ambiente, monkeypatch):
     assert len(historico) == 2
 
 
-async def test_duas_tentativas_sem_resposta_entram_em_standby_sem_repetir_bot(ambiente, monkeypatch):
+async def test_duas_tentativas_sem_resposta_entram_em_standby_sem_repetir_bot(
+    ambiente, monkeypatch
+):
     _, maker = ambiente
     instante = [BASE]
     monkeypatch.setattr("app.services.atendimento.now", lambda: instante[0])
@@ -155,7 +190,10 @@ async def test_duas_tentativas_sem_resposta_entram_em_standby_sem_repetir_bot(am
 async def test_fora_expediente_responde_uma_vez_e_reabre_no_inicio(ambiente, monkeypatch):
     _, maker = ambiente
     from app.core.config import get_settings
-    config = get_settings().model_copy(update={"expediente_inicio": "07:00", "expediente_fim": "18:30"})
+
+    config = get_settings().model_copy(
+        update={"expediente_inicio": "07:00", "expediente_fim": "18:30"}
+    )
     monkeypatch.setattr("app.services.atendimento.get_settings", lambda: config)
     instante = [datetime(2026, 10, 26, 23, 0, 0)]  # 20h em São Paulo.
     monkeypatch.setattr("app.services.atendimento.now", lambda: instante[0])
@@ -176,7 +214,10 @@ async def test_fora_expediente_responde_uma_vez_e_reabre_no_inicio(ambiente, mon
 async def test_timer_pausa_ao_fechar_expediente_sem_enviar_aviso(ambiente, monkeypatch):
     _, maker = ambiente
     from app.core.config import get_settings
-    config = get_settings().model_copy(update={"expediente_inicio": "07:00", "expediente_fim": "18:30"})
+
+    config = get_settings().model_copy(
+        update={"expediente_inicio": "07:00", "expediente_fim": "18:30"}
+    )
     monkeypatch.setattr("app.services.atendimento.get_settings", lambda: config)
     instante = [datetime(2026, 10, 26, 20, 0, 0)]  # 17h em São Paulo.
     monkeypatch.setattr("app.services.atendimento.now", lambda: instante[0])
@@ -200,7 +241,9 @@ async def test_primeira_resposta_humana_cancela_timer(ambiente, monkeypatch):
     await enviar(maker, "5511888005", "1", "hum-2")
     conversa, _, _ = await dados(maker, "5511888005")
     await entrar(client, "a@teste.local")
-    assert (await client.post(f"/api/atendimentos/{conversa.id}/mensagens", data={"texto": "Bom dia"})).status_code == 200
+    assert (
+        await client.post(f"/api/atendimentos/{conversa.id}/mensagens", data={"texto": "Bom dia"})
+    ).status_code == 200
     instante[0] = BASE + timedelta(seconds=220)
     await timer(maker)
     conversa, mensagens, historico = await dados(maker, "5511888005")
@@ -215,8 +258,12 @@ async def test_simulador_usa_entrada_comum_e_setor_fixo(ambiente):
     client, maker = ambiente
     await entrar(client, "gestor@teste.local")
     assert (await client.get("/api/simulador")).status_code == 200
-    assert (await client.post("/api/simulador", data={"cliente": "cliente2", "texto": "oi"})).status_code == 200
-    assert (await client.post("/api/simulador", data={"cliente": "cliente2", "texto": "2"})).status_code == 200
+    assert (
+        await client.post("/api/simulador", data={"cliente": "cliente2", "texto": "oi"})
+    ).status_code == 200
+    assert (
+        await client.post("/api/simulador", data={"cliente": "cliente2", "texto": "2"})
+    ).status_code == 200
     pagina = await client.get("/api/simulador?cliente=cliente2")
     assert MENU_SETOR in [m["texto"] for m in pagina.json()["mensagens"]]
     conversa, mensagens, historico = await dados(maker, "5511999000002")
@@ -230,7 +277,9 @@ async def test_simulador_usa_entrada_comum_e_setor_fixo(ambiente):
 async def test_gestor_configura_nome_e_responsavel_do_setor(ambiente):
     client, maker = ambiente
     await entrar(client, "gestor@teste.local")
-    resposta = await client.post("/api/gestor/setores/2", data={"nome": "Trocas", "responsavel_id": "6"})
+    resposta = await client.post(
+        "/api/gestor/setores/2", data={"nome": "Trocas", "responsavel_id": "6"}
+    )
     assert resposta.status_code == 200
     await enviar(maker, "5511888006", "inválido", "setor-1")
     conversa, mensagens, _ = await dados(maker, "5511888006")

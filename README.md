@@ -9,11 +9,11 @@ O React é compilado dentro do Docker e servido pelo próprio FastAPI; não há 
 
 Para receber mensagens da Meta, crie um Cloudflare Tunnel dedicado, copie seu token para `CLOUDFLARE_TUNNEL_TOKEN` no `.env` e inicie `docker compose --profile webhook up -d`. Na rota publicada do túnel, use o hostname desejado, o caminho `^/webhook/whatsapp$` e o serviço `http://app:8000`. Na Meta, configure `https://<hostname>/webhook/whatsapp`, o valor de `META_VERIFY_TOKEN` e assine o campo `messages`.
 
-## Preparar HTTPS do painel
+## Painel HTTPS
 
-O túnel atual publica apenas o webhook. Para disponibilizar o painel em `https://painel.jangustavo.me`, primeiro crie em Cloudflare Zero Trust → Access controls → Applications uma aplicação **Self-hosted** para esse host, com política **Allow somente para e-mails autorizados** (não use Everyone). Habilite **Protect with Access** no túnel para essa aplicação. Só depois adicione uma rota publicada no mesmo túnel com hostname `painel.jangustavo.me`, caminho `/` e serviço `http://app:8000`. A rota `wpp.jangustavo.me/webhook/whatsapp` continua separada e sem Access, pois a Meta precisa alcançá-la.
+O painel está publicado em [https://painel.jangustavo.me](https://painel.jangustavo.me) por Cloudflare Tunnel, com **Protect with Access** e política **Allow** para `jeeh2200@gmail.com` e `jandersongustavo1@gmail.com`. Após a autenticação por código enviado ao e-mail, faça o login próprio do painel. A rota `wpp.jangustavo.me/webhook/whatsapp` continua separada e sem Access, pois a Meta precisa alcançá-la.
 
-Defina `PANEL_HTTPS_HOST=painel.jangustavo.me` no `.env` e recrie o app. Nesse host o cookie de login será `Secure`, e POSTs para `/api/` exigirão `Origin: https://painel.jangustavo.me`. Mantenha o login do próprio painel além do Cloudflare Access. O acesso HTTP local continua disponível para testes na rede. Não publique o host do painel antes de configurar a política Access.
+`PANEL_HTTPS_HOST=painel.jangustavo.me` no `.env` ativa cookie `Secure` e exige `Origin: https://painel.jangustavo.me` nos POSTs para `/api/`. O acesso HTTP local continua disponível para testes na rede.
 
 O painel e o formulário de chamados usam React. A API JSON fica em `/api`; os testes rodam com `pytest tests/ -v` em um ambiente Python com as dependências de desenvolvimento instaladas.
 

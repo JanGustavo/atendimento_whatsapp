@@ -181,7 +181,7 @@ class Chamado(Base):
 
 class AcessoRemoto(Base):
     __tablename__ = "acessos_remotos"
-    __table_args__ = (CheckConstraint("resultado IN ('aceito','recusado','cancelado','simulado')"),)
+    __table_args__ = (CheckConstraint("resultado IN ('pendente','autorizado','recusado','expirado','encerrado','cancelado','simulado','aceito')"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     chamado_id: Mapped[int] = mapped_column(ForeignKey("chamados.id"), index=True)
@@ -190,5 +190,8 @@ class AcessoRemoto(Base):
     inicio_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
     fim_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resultado: Mapped[str] = mapped_column(String(20), nullable=False)
+    expira_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    autorizado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    autorizado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     solicitante: Mapped[Usuario] = relationship()
     computador: Mapped[Computador] = relationship()

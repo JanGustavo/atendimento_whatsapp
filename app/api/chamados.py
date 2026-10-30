@@ -1,6 +1,7 @@
 """Abertura de chamados e registro de pedidos de acesso remoto."""
 
 import hmac
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select, update
@@ -16,6 +17,15 @@ from app.models import AcessoRemoto, Chamado, Computador, Usuario
 from app.services.remoto import provider_remoto_atual
 
 router = APIRouter()
+
+
+async def expirar_pendentes(db: AsyncSession) -> None:
+    instante = agora()
+    await db.execute(update(AcessoRemoto).where(AcessoRemoto.resultado == 'pendente', AcessoRemoto.expira_em <= instante).values(resultado='expirado', fim_em=instante))
+
+
+def serializar_acesso(acesso: AcessoRemoto) -> dict:
+    return {'id': acesso.id, 'resultado': acesso.resultado, 'solicitante': acesso.solicitante.nome if acesso.solicitante else None, 'inicio_em': acesso.inicio_em.isoformat(), 'fim_em': acesso.fim_em.isoformat() if acesso.fim_em else None, 'expira_em': acesso.expira_em.isoformat() if acesso.expira_em else None, 'acesso_url': None}
 
 
 def validar_token(token: str) -> None:
@@ -170,6 +180,8 @@ async def listar_chamados(
         .scalars()
         .all()
     )
+    await expirar_pendentes(db)
+    await db.commit()
     acessos = (
         (
             await db.execute(
@@ -181,8 +193,6 @@ async def listar_chamados(
         .scalars()
         .all()
     )
-    provider = provider_remoto_atual()
-    computadores_por_chamado = {chamado.id: chamado.computador for chamado in chamados}
     historico: dict[int, list[dict]] = {}
     for acesso in acessos:
         historico.setdefault(acesso.chamado_id, []).append(
@@ -192,8 +202,8 @@ async def listar_chamados(
                 "resultado": acesso.resultado,
                 "inicio_em": acesso.inicio_em.isoformat(),
                 "fim_em": acesso.fim_em.isoformat() if acesso.fim_em else None,
-                "acesso_url": provider.link_acesso(computadores_por_chamado[acesso.chamado_id])
-                if acesso.resultado == "aceito" and acesso.fim_em is None else None,
+                "expira_em": acesso.expira_em.isoformat() if acesso.expira_em else None,
+                "acesso_url": None,  # Fail closed ate existir revogacao real MeshCentral.
             }
         )
     return [
@@ -288,9 +298,13 @@ async def solicitar_acesso(
         )
     if chamado.status == "fechado":
         raise HTTPException(status_code=409, detail="Chamado fechado")
+    await expirar_pendentes(db)
+    pendente = (await db.execute(select(AcessoRemoto.id).where(AcessoRemoto.computador_id == chamado.computador_id, AcessoRemoto.resultado == "pendente"))).first()
+    if pendente:
+        raise HTTPException(status_code=409, detail="Ja existe uma solicitacao pendente para este computador")
     provider = provider_remoto_atual()
     resultado = await provider.solicitar_acesso(chamado.computador)
-    if resultado not in {"aceito", "recusado", "cancelado", "simulado"}:
+    if resultado not in {"pendente", "recusado", "cancelado", "simulado"}:
         raise HTTPException(status_code=502, detail="Resultado inválido do provider remoto")
     instante = agora()
     atualizado = await db.execute(
@@ -307,12 +321,13 @@ async def solicitar_acesso(
         computador_id=chamado.computador_id,
         inicio_em=instante,
         fim_em=instante if resultado in {"recusado", "cancelado", "simulado"} else None,
+        expira_em=instante + timedelta(seconds=60) if resultado == "pendente" else None,
         resultado=resultado,
     )
     db.add(acesso)
     await db.commit()
     return {"id": acesso.id, "resultado": acesso.resultado,
-            "acesso_url": provider.link_acesso(chamado.computador) if resultado == "aceito" else None}
+            "acesso_url": None}
 
 
 @router.post("/api/chamados/{chamado_id}/fechar")
@@ -334,5 +349,42 @@ async def fechar_chamado(
     if resultado.rowcount != 1:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Chamado não encontrado ou já fechado")
+    await db.execute(update(AcessoRemoto).where(AcessoRemoto.chamado_id == chamado_id, AcessoRemoto.resultado.in_(["pendente", "autorizado"])).values(resultado="encerrado", fim_em=agora()))
     await db.commit()
     return {"status": "fechado"}
+
+
+@router.get("/api/meus-acessos")
+async def meus_acessos(db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(vendedor)):
+    await expirar_pendentes(db)
+    acessos = (await db.execute(select(AcessoRemoto).join(Computador, AcessoRemoto.computador_id == Computador.id).options(selectinload(AcessoRemoto.solicitante)).where(Computador.dono_id == user.user_id, Computador.grupo == "empresa", AcessoRemoto.resultado.in_(["pendente", "autorizado"])).order_by(AcessoRemoto.id.desc()))).scalars().all()
+    await db.commit()
+    return [serializar_acesso(acesso) for acesso in acessos]
+
+
+@router.post("/api/meus-acessos/{acesso_id}/decisao")
+async def decidir_acesso(acesso_id: int, request: Request, db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(vendedor)):
+    dados = await form(request)
+    decisao = dados.get("decisao")
+    if decisao not in {"autorizar", "recusar"}:
+        raise HTTPException(status_code=422, detail="Decisao invalida")
+    await expirar_pendentes(db)
+    instante = agora()
+    resultado = "autorizado" if decisao == "autorizar" else "recusado"
+    atualizacao = await db.execute(update(AcessoRemoto).where(AcessoRemoto.id == acesso_id, AcessoRemoto.resultado == "pendente", AcessoRemoto.expira_em > instante, AcessoRemoto.computador_id.in_(select(Computador.id).where(Computador.dono_id == user.user_id, Computador.grupo == "empresa"))).values(resultado=resultado, autorizado_por_id=user.user_id if decisao == "autorizar" else None, autorizado_em=instante if decisao == "autorizar" else None, fim_em=instante if decisao == "recusar" else None))
+    if atualizacao.rowcount != 1:
+        await db.commit()  # preserva a expiracao realizada antes da tentativa invalida
+        raise HTTPException(status_code=409, detail="Solicitacao expirada, encerrada ou nao autorizada")
+    await db.commit()
+    return {"resultado": resultado, "acesso_url": None, "detalhe": "Consentimento registrado; conexao MeshCentral permanece desabilitada"}
+
+
+@router.post("/api/meus-acessos/{acesso_id}/encerrar")
+async def encerrar_meu_acesso(acesso_id: int, db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(vendedor)):
+    instante = agora()
+    atualizado = await db.execute(update(AcessoRemoto).where(AcessoRemoto.id == acesso_id, AcessoRemoto.resultado.in_(["pendente", "autorizado"]), AcessoRemoto.computador_id.in_(select(Computador.id).where(Computador.dono_id == user.user_id, Computador.grupo == "empresa"))).values(resultado="encerrado", fim_em=instante))
+    if atualizado.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Solicitacao ja finalizada ou nao autorizada")
+    await db.commit()
+    return {"resultado": "encerrado"}

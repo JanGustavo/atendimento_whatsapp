@@ -39,6 +39,9 @@ def serializar_acesso(acesso: AcessoRemoto, computador_nome: str, motivo: str) -
         "expira_em": acesso.expira_em.isoformat() if acesso.expira_em else None,
         "autorizado_por_id": acesso.autorizado_por_id,
         "autorizado_em": acesso.autorizado_em.isoformat() if acesso.autorizado_em else None,
+        "respondido_por_id": acesso.respondido_por_id,
+        "respondido_em": acesso.respondido_em.isoformat() if acesso.respondido_em else None,
+        "encerrado_por_id": acesso.encerrado_por_id,
         "fim_em": acesso.fim_em.isoformat() if acesso.fim_em else None,
         "sessao_remota_ativa": False,  # ainda nao ha integracao MeshCentral
         "acesso_url": None,
@@ -224,6 +227,9 @@ async def listar_chamados(
                 "solicitante_id": acesso.solicitante_id,
                 "autorizado_por_id": acesso.autorizado_por_id,
                 "autorizado_em": acesso.autorizado_em.isoformat() if acesso.autorizado_em else None,
+                "respondido_por_id": acesso.respondido_por_id,
+                "respondido_em": acesso.respondido_em.isoformat() if acesso.respondido_em else None,
+                "encerrado_por_id": acesso.encerrado_por_id,
                 "sessao_remota_ativa": False,
                 "resultado": acesso.resultado,
                 "inicio_em": acesso.inicio_em.isoformat(),
@@ -375,7 +381,7 @@ async def fechar_chamado(
     if resultado.rowcount != 1:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Chamado não encontrado ou já fechado")
-    await db.execute(update(AcessoRemoto).where(AcessoRemoto.chamado_id == chamado_id, AcessoRemoto.resultado.in_(["pendente", "autorizado"])).values(resultado="encerrado", fim_em=agora()))
+    await db.execute(update(AcessoRemoto).where(AcessoRemoto.chamado_id == chamado_id, AcessoRemoto.resultado.in_(["pendente", "autorizado"])).values(resultado="encerrado", fim_em=agora(), encerrado_por_id=user.user_id))
     await db.commit()
     return {"status": "fechado"}
 
@@ -413,7 +419,7 @@ async def decidir_acesso(acesso_id: int, request: Request, db: AsyncSession = De
     await expirar_pendentes(db)
     instante = agora()
     resultado = "autorizado" if decisao == "autorizar" else "recusado"
-    atualizacao = await db.execute(update(AcessoRemoto).where(AcessoRemoto.id == acesso_id, AcessoRemoto.resultado == "pendente", AcessoRemoto.expira_em > instante, AcessoRemoto.computador_id.in_(select(Computador.id).where(Computador.dono_id == user.user_id, Computador.grupo == "empresa"))).values(resultado=resultado, autorizado_por_id=user.user_id if decisao == "autorizar" else None, autorizado_em=instante if decisao == "autorizar" else None, fim_em=instante if decisao == "recusar" else None))
+    atualizacao = await db.execute(update(AcessoRemoto).where(AcessoRemoto.id == acesso_id, AcessoRemoto.resultado == "pendente", AcessoRemoto.expira_em > instante, AcessoRemoto.computador_id.in_(select(Computador.id).where(Computador.dono_id == user.user_id, Computador.grupo == "empresa"))).values(resultado=resultado, autorizado_por_id=user.user_id if decisao == "autorizar" else None, autorizado_em=instante if decisao == "autorizar" else None, respondido_por_id=user.user_id, respondido_em=instante, fim_em=instante if decisao == "recusar" else None))
     if atualizacao.rowcount != 1:
         await db.commit()  # preserva a expiracao realizada antes da tentativa invalida
         raise HTTPException(status_code=409, detail="Solicitacao expirada, encerrada ou nao autorizada")
@@ -424,7 +430,7 @@ async def decidir_acesso(acesso_id: int, request: Request, db: AsyncSession = De
 @router.post("/api/meus-acessos/{acesso_id}/encerrar")
 async def encerrar_meu_acesso(acesso_id: int, db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(vendedor)):
     instante = agora()
-    atualizado = await db.execute(update(AcessoRemoto).where(AcessoRemoto.id == acesso_id, AcessoRemoto.resultado.in_(["pendente", "autorizado"]), AcessoRemoto.computador_id.in_(select(Computador.id).where(Computador.dono_id == user.user_id, Computador.grupo == "empresa"))).values(resultado="encerrado", fim_em=instante))
+    atualizado = await db.execute(update(AcessoRemoto).where(AcessoRemoto.id == acesso_id, AcessoRemoto.resultado.in_(["pendente", "autorizado"]), AcessoRemoto.computador_id.in_(select(Computador.id).where(Computador.dono_id == user.user_id, Computador.grupo == "empresa"))).values(resultado="encerrado", fim_em=instante, encerrado_por_id=user.user_id))
     if atualizado.rowcount != 1:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Solicitacao ja finalizada ou nao autorizada")

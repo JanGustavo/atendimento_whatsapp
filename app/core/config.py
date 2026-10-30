@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     chamado_install_token: str = ""
     remoto_provider: Literal["simulado", "meshcentral"] = "simulado"
     meshcentral_url: str = ""
+    meshcentral_event_monitor: bool = False
+    meshcentral_audit_username: str = ""
+    meshcentral_audit_password: str = ""
     panel_https_host: str = ""
     media_dir: str = "./media"
     presenca_intervalo_segundos: int = 30

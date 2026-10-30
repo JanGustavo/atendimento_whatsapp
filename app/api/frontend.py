@@ -1,13 +1,16 @@
 """Leituras JSON para o painel React. As mutações reutilizam as rotas existentes."""
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import and_, func, select
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.atendimentos import conversa_visivel
 from app.api.deps import UsuarioAtual, get_current_user, somente_gestor
+from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.utils import now
 from app.models import (
     Atribuicao,
     Conversa,
@@ -19,6 +22,7 @@ from app.models import (
     Usuario,
 )
 from app.providers import CLIENTES, provider_atual
+from app.services.media import caminho_media, foto_url, guardar_webp
 
 router = APIRouter(prefix="/api")
 
@@ -27,6 +31,8 @@ def conversa_json(conversa: Conversa) -> dict:
     return {
         "id": conversa.id,
         "numero": conversa.numero,
+        "nome_contato": conversa.nome_contato,
+        "foto_url": f"/api/atendimentos/{conversa.id}/foto?v={conversa.foto_chave}" if conversa.foto_chave else None,
         "status": conversa.status,
         "etapa": conversa.etapa,
         "setor_id": conversa.setor_id,
@@ -49,6 +55,11 @@ def mensagem_json(mensagem: Mensagem) -> dict:
         "envio_status": mensagem.envio_status,
         "lida_em": mensagem.lida_em.isoformat() if mensagem.lida_em else None,
         "texto": mensagem.texto,
+        "imagem_url": (
+            f"/api/atendimentos/{mensagem.conversa_id}/mensagens/{mensagem.id}/imagem"
+            if mensagem.imagem_chave
+            else None
+        ),
         "autor_id": mensagem.autor_id,
         "criada_em": mensagem.criada_em.isoformat() if mensagem.criada_em else None,
     }
@@ -62,7 +73,46 @@ async def me(user: UsuarioAtual = Depends(get_current_user), db: AsyncSession = 
         "nome": user.nome,
         "email": usuario.email,
         "role": user.role,
+        "foto_url": foto_url(usuario),
+        "presenca_intervalo_segundos": get_settings().presenca_intervalo_segundos,
     }
+
+
+@router.post("/presenca")
+async def registrar_presenca(db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(get_current_user)):
+    usuario = await db.get(Usuario, user.user_id)
+    usuario.ultima_atividade_em = now()
+    await db.commit()
+    return {"online": True}
+
+
+@router.post("/me/foto")
+async def trocar_foto(request: Request, db: AsyncSession = Depends(get_db),
+                     user: UsuarioAtual = Depends(get_current_user)):
+    usuario = await db.get(Usuario, user.user_id)
+    chave, arquivo = await guardar_webp(request)
+    anterior = usuario.foto_chave
+    try:
+        usuario.foto_chave = chave
+        await db.commit()
+    except Exception:
+        arquivo.unlink(missing_ok=True)
+        raise
+    if anterior:
+        caminho_media(anterior).unlink(missing_ok=True)
+    return {"foto_url": foto_url(usuario)}
+
+
+@router.get("/usuarios/{usuario_id}/foto")
+async def foto_usuario(usuario_id: int, db: AsyncSession = Depends(get_db),
+                      user: UsuarioAtual = Depends(get_current_user)):
+    usuario = await db.get(Usuario, usuario_id)
+    if usuario is None or not usuario.ativo or not usuario.foto_chave:
+        raise HTTPException(status_code=404, detail="Foto não encontrada")
+    arquivo = caminho_media(usuario.foto_chave)
+    if not arquivo.is_file():
+        raise HTTPException(status_code=404, detail="Foto não encontrada")
+    return FileResponse(arquivo, media_type="image/webp", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/atendimentos")
@@ -82,7 +132,7 @@ async def conversas(
     elif vendedor is not None:
         stmt = stmt.where(Conversa.atribuido_id == vendedor)
     if q.strip():
-        stmt = stmt.where(Conversa.numero.contains(q.strip()))
+        stmt = stmt.where(or_(Conversa.numero.contains(q.strip()), Conversa.nome_contato.contains(q.strip())))
     resultado = (await db.execute(stmt)).scalars().all()
     if not resultado:
         return []
@@ -111,6 +161,39 @@ async def conversas(
         {**conversa_json(conversa), "nao_lidas": contagens.get(conversa.id, 0)}
         for conversa in resultado
     ]
+
+
+@router.post("/atendimentos/{conversa_id}/foto")
+async def foto_contato_enviar(
+    conversa_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    conversa = await conversa_visivel(db, conversa_id, user)
+    chave, arquivo = await guardar_webp(request)
+    anterior = conversa.foto_chave
+    try:
+        conversa.foto_chave = chave
+        await db.commit()
+    except Exception:
+        arquivo.unlink(missing_ok=True)
+        raise
+    if anterior:
+        caminho_media(anterior).unlink(missing_ok=True)
+    return {"foto_url": f"/api/atendimentos/{conversa_id}/foto?v={chave}"}
+
+
+@router.get("/atendimentos/{conversa_id}/foto")
+async def foto_contato_ler(
+    conversa_id: int, db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    conversa = await conversa_visivel(db, conversa_id, user)
+    if not conversa.foto_chave:
+        raise HTTPException(status_code=404, detail="Foto não encontrada")
+    arquivo = caminho_media(conversa.foto_chave)
+    if not arquivo.is_file():
+        raise HTTPException(status_code=404, detail="Foto não encontrada")
+    return FileResponse(arquivo, media_type="image/webp", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/atendimentos/{conversa_id}")

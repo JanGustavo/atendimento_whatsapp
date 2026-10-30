@@ -19,8 +19,12 @@ class Settings(BaseSettings):
     aviso_transferencia_texto: str = "Seu atendimento foi transferido para {nome}."
     app_log_level: str = "INFO"
     chamado_install_token: str = ""
+    remoto_provider: Literal["simulado", "meshcentral"] = "simulado"
+    meshcentral_url: str = ""
     panel_https_host: str = ""
     media_dir: str = "./media"
+    presenca_intervalo_segundos: int = 30
+    presenca_limite_segundos: int = 90
     timer_espera_segundos: int = 90
     timer_aviso_segundos: int = 60
     timer_maximo_segundos: int = 210

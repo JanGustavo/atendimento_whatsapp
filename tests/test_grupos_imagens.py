@@ -8,7 +8,7 @@ from app.models import MensagemGrupo
 async def test_grupo_surge_com_dois_membros_e_isola_mensagens(ambiente, monkeypatch, tmp_path):
     client, maker = ambiente
     monkeypatch.setattr(
-        "app.api.interno.get_settings", lambda: SimpleNamespace(media_dir=str(tmp_path))
+        "app.services.media.get_settings", lambda: SimpleNamespace(media_dir=str(tmp_path))
     )
     await entrar(client, "gestor@teste.local")
     criado = await client.post("/api/gestor/setores-internos", data={"nome": "Supervisão"})
@@ -62,7 +62,7 @@ async def test_grupo_surge_com_dois_membros_e_isola_mensagens(ambiente, monkeypa
 async def test_imagem_webp_fica_privada_e_no_banco_so_chave(ambiente, monkeypatch, tmp_path):
     client, maker = ambiente
     monkeypatch.setattr(
-        "app.api.interno.get_settings", lambda: SimpleNamespace(media_dir=str(tmp_path))
+        "app.services.media.get_settings", lambda: SimpleNamespace(media_dir=str(tmp_path))
     )
     imagem = b"RIFF" + (12).to_bytes(4, "little") + b"WEBPVP8 " + b"\x00\x00\x00\x00"
     await entrar(client, "a@teste.local")
@@ -73,13 +73,15 @@ async def test_imagem_webp_fica_privada_e_no_banco_so_chave(ambiente, monkeypatc
     )
     assert ruim.status_code == 415
     enviada = await client.post(
-        "/api/interno/mensagens/4/imagem",
+        "/api/interno/mensagens/4/imagem?texto=Comprovante+anexo",
         content=imagem,
         headers={"Content-Type": "image/webp"},
     )
     assert enviada.status_code == 200
     mensagem = (await client.get("/api/interno/mensagens/4")).json()[0]
-    assert mensagem["texto"] == "" and mensagem["imagem_url"].startswith("/api/interno/imagens/")
+    assert mensagem["texto"] == "Comprovante anexo" and mensagem["imagem_url"].startswith(
+        "/api/interno/imagens/"
+    )
     assert (await client.get(mensagem["imagem_url"])).content == imagem
     await entrar(client, "b@teste.local")
     assert (await client.get(mensagem["imagem_url"])).status_code == 404

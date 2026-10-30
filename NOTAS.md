@@ -56,3 +56,24 @@ Em 29/10/2026, o painel HTTPS foi publicado em `painel.jangustavo.me` pelo túne
 Para testar sem Internet, conecte computador e celular à mesma rede local (o hotspot do celular serve mesmo sem dados móveis), descubra o novo IP local do computador e abra `http://<IP>:18087/painel`. O chat interno usa apenas a rede local e o SQLite. O webhook e o envio pela Cloud API da Meta dependem de Internet; sem ela, mensagens reais de WhatsApp não chegam nem saem.
 
 Os setores internos são independentes dos quatro setores do menu WhatsApp. O gestor pode criar/renomear qualquer setor interno e transferir usuários entre eles. O grupo aparece para membros ativos quando o setor tem pelo menos dois membros ativos; o acesso ao histórico do grupo segue o setor atual do usuário. Imagens nesta etapa funcionam apenas no chat interno. O navegador converte para WebP, sem dependência Python adicional; uploads inválidos e arquivos acima de 2 MB são rejeitados. O arquivo fica no volume, enquanto o banco guarda a chave privada. O chat WhatsApp continua somente texto até uma etapa própria de mídia.
+
+## Conversas internas, presença e fotos (29/10/2026)
+
+- A lista de conversas internas mostra remetente, prévia da última mensagem e não lidas por pessoa ou grupo. O ponto de leitura fica no banco, por usuário e conversa.
+- O gestor pode abrir todos os grupos de setores com pelo menos dois membros ativos. Demais usuários só acessam o grupo do próprio setor. Setores com apenas um membro ainda não têm grupo.
+- `Usuario.online` continua sendo a disponibilidade manual para distribuição de Vendas. A presença visível no chat interno é calculada pela última atividade do painel: heartbeat a cada `PRESENCA_INTERVALO_SEGUNDOS` (30 s), offline após `PRESENCA_LIMITE_SEGUNDOS` (90 s) sem heartbeat. O browser só envia heartbeat quando a aba está visível. Não há webhook ou WebSocket para isso.
+- Cada usuário pode enviar sua foto na tela Minha conta. O navegador converte a imagem para WebP e limita a 512 px. O arquivo fica no volume privado `/data/media` e o SQLite guarda apenas a chave. O acesso ao arquivo exige login.
+- O token gerado em Meta for Developers é temporário e expira em aproximadamente 24 horas. Para uso contínuo, criar um usuário de sistema no Business Manager com as permissões `whatsapp_business_messaging` e `whatsapp_business_management`, atribuir o ativo do WhatsApp e gerar token de usuário de sistema. Trocar `META_ACCESS_TOKEN` no `.env` e recriar o serviço. Nunca colar o token em chats ou commits.
+
+## Nome do cliente no WhatsApp
+
+O webhook oficial da Meta fornece o nome do perfil em `contacts[].profile.name`. A aplicação associa pelo `wa_id` ao número remetente, salva o nome na conversa e o atualiza quando chega uma nova mensagem. O painel mostra número em destaque, nome abaixo e busca por ambos. Conversas antigas recebem o nome quando o cliente volta a escrever; sem nome, o painel usa o número e um avatar com iniciais. A Cloud API não inclui a foto pessoal do cliente nesse webhook nem oferece uma rota de leitura dessa foto; não atribuir uma foto inventada ao cliente.
+
+Em 30/10/2026, um novo webhook real confirmou o nome de perfil `Jan` para a conversa de teste. As conversas anteriores continuavam sem nome por não terem salvo esse campo antes da migração; o próximo evento recebido as atualiza. A foto pessoal do cliente não é entregue pelo webhook da Meta. Para exibi-la, um atendente com acesso à conversa pode usar **Adicionar foto** no cabeçalho. A foto é fornecida pela equipe, convertida para WebP no navegador, guardada no volume privado e protegida pelo mesmo isolamento da conversa.
+
+## Envio de fotos com mensagens (30/10/2026)
+
+- O painel permite anexar foto junto à mensagem tanto no atendimento WhatsApp quanto no chat interno. O navegador converte a imagem para WebP no frontend antes do envio (sem dependência de bibliotecas Python adicionais como Pillow).
+- A API `/api/atendimentos/{id}/mensagens` aceita corpo `image/webp` com a legenda opcional em parâmetro `texto`, armazenando o WebP no volume privado `/data/media` e a chave em `mensagens.imagem_chave`. O provider WhatsApp envia a foto e a legenda correspondente.
+- As imagens das mensagens ficam disponíveis em `/api/atendimentos/{conversa_id}/mensagens/{mensagem_id}/imagem`, respeitando a visibilidade e o isolamento de conversa do usuário autenticado.
+- No chat interno, `/api/interno/mensagens/{colega_id}/imagem` e `/api/interno/grupos/{setor_id}/imagens` agora aceitam o texto da mensagem via parâmetro `texto`, associando a imagem e a legenda a uma única mensagem no banco e na tela.

@@ -215,16 +215,20 @@ async def transferir(
     ):
         raise HTTPException(status_code=422, detail="Destino inválido")
     antigo = conversa.atribuido_id
-    if antigo == alvo.id:
+    if antigo is not None and antigo == alvo.id:
         raise HTTPException(status_code=409, detail="Conversa já atribuída a este usuário")
     instante = now()
+    condicoes = [
+        Conversa.id == conversa_id,
+        Conversa.status == "aberta",
+    ]
+    if antigo is not None:
+        condicoes.append(Conversa.atribuido_id == antigo)
+    else:
+        condicoes.append(Conversa.atribuido_id.is_(None))
     resultado = await db.execute(
         update(Conversa)
-        .where(
-            Conversa.id == conversa_id,
-            Conversa.atribuido_id == antigo,
-            Conversa.status == "aberta",
-        )
+        .where(*condicoes)
         .values(
             atribuido_id=alvo.id,
             etapa="atribuida",

@@ -258,3 +258,37 @@ async def test_webhook_meta_verifica_assinatura_idempotencia_midia_e_lote(ambien
         "No momento só atendemos por texto",
     ]
     assert len(envios) == 3
+
+
+async def test_meta_envia_imagem_com_legenda(monkeypatch, tmp_path):
+    arquivo = tmp_path / "foto.webp"
+    arquivo.write_bytes(b"conteudo-da-imagem")
+    monkeypatch.setattr(
+        "app.providers.meta.caminho_media",
+        lambda _chave: arquivo,
+    )
+    requisicoes = []
+
+    def responder(request):
+        requisicoes.append(request)
+        if request.url.path.endswith("/media"):
+            assert request.headers["authorization"] == "Bearer token-teste"
+            return httpx.Response(200, json={"id": "media-12345"})
+        if request.url.path.endswith("/messages"):
+            dados = json.loads(request.content)
+            assert dados["type"] == "image"
+            assert dados["image"]["id"] == "media-12345"
+            assert dados["image"]["caption"] == "Legenda da foto"
+            return httpx.Response(200, json={"messages": [{"id": "wamid.imagem.1"}]})
+        return httpx.Response(404)
+
+    cliente_original = httpx.AsyncClient
+    transporte = httpx.MockTransport(responder)
+    monkeypatch.setattr(
+        "app.providers.meta.httpx.AsyncClient",
+        lambda **kwargs: cliente_original(transport=transporte, **kwargs),
+    )
+    provider = MetaProvider("v25.0", "123", "token-teste")
+    id_msg = await provider.enviar_imagem("5511999998888", "foto.webp", legenda="Legenda da foto")
+    assert id_msg == "wamid.imagem.1"
+    assert len(requisicoes) == 2

@@ -3,10 +3,15 @@
 import httpx
 
 from app.providers.base import MensagemEntrada
+from app.services.media import caminho_media
 
 
 class MetaTokenExpirado(Exception):
     """A Graph API informou que o token de acesso expirou."""
+
+
+class MetaEnvioRecusado(Exception):
+    """A Graph API recusou o envio por um motivo diferente de token expirado."""
 
 
 def _token_expirado(resposta: httpx.Response) -> bool:
@@ -15,6 +20,18 @@ def _token_expirado(resposta: httpx.Response) -> bool:
         return erro.get("code") == 190 and erro.get("error_subcode") == 463
     except (ValueError, AttributeError):
         return False
+
+
+def _erro_envio(resposta: httpx.Response) -> str:
+    try:
+        erro = resposta.json().get("error", {})
+        mensagem = erro.get("message")
+        codigo = erro.get("code")
+        if isinstance(mensagem, str) and mensagem:
+            return f"Meta recusou o envio (HTTP {resposta.status_code}, código {codigo}): {mensagem}"
+    except (ValueError, AttributeError):
+        pass
+    return f"Meta recusou o envio (HTTP {resposta.status_code})."
 
 
 class MetaProvider:
@@ -57,7 +74,58 @@ class MetaProvider:
             )
             if _token_expirado(resposta):
                 raise MetaTokenExpirado("Token de acesso da Meta expirou")
-            resposta.raise_for_status()
+            if resposta.is_error:
+                raise MetaEnvioRecusado(_erro_envio(resposta))
+            dados = resposta.json()
+            identidade = (dados.get("messages") or [{}])[0].get("id")
+            if not isinstance(identidade, str) or not identidade:
+                raise ValueError("Meta não retornou o ID da mensagem")
+            return identidade
+
+    async def enviar_imagem(
+        self, numero: str, imagem_chave: str, legenda: str | None = None
+    ) -> str:
+        numero = "".join(caractere for caractere in numero if caractere.isdigit())
+        if not numero:
+            raise ValueError("Número inválido")
+        if numero.startswith("55") and len(numero) == 12 and numero[4] in "6789":
+            numero = numero[:4] + "9" + numero[4:]
+        caminho = caminho_media(imagem_chave)
+        if not caminho.is_file():
+            raise ValueError("Arquivo de imagem não encontrado")
+        dados_arquivo = caminho.read_bytes()
+        async with httpx.AsyncClient(timeout=20) as client:
+            resposta_upload = await client.post(
+                f"{self._url}/media",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                data={"messaging_product": "whatsapp", "type": "image/webp"},
+                files={"file": (imagem_chave, dados_arquivo, "image/webp")},
+            )
+            if _token_expirado(resposta_upload):
+                raise MetaTokenExpirado("Token de acesso da Meta expirou")
+            if resposta_upload.is_error:
+                raise MetaEnvioRecusado(_erro_envio(resposta_upload))
+            media_id = (resposta_upload.json() or {}).get("id")
+            if not isinstance(media_id, str) or not media_id:
+                raise ValueError("Meta não retornou o ID da mídia enviada")
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": numero,
+                "type": "image",
+                "image": {"id": media_id},
+            }
+            if legenda:
+                payload["image"]["caption"] = legenda
+            resposta = await client.post(
+                f"{self._url}/messages",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                json=payload,
+            )
+            if _token_expirado(resposta):
+                raise MetaTokenExpirado("Token de acesso da Meta expirou")
+            if resposta.is_error:
+                raise MetaEnvioRecusado(_erro_envio(resposta))
             dados = resposta.json()
             identidade = (dados.get("messages") or [{}])[0].get("id")
             if not isinstance(identidade, str) or not identidade:
@@ -109,6 +177,14 @@ class MetaProvider:
                 numero_destino = str((valor.get("metadata") or {}).get("phone_number_id") or "")
                 if numero_destino and numero_destino != self.phone_number_id:
                     continue
+                nomes = {}
+                for contato in valor.get("contacts") or []:
+                    if not isinstance(contato, dict):
+                        continue
+                    perfil = contato.get("profile") or {}
+                    nome = perfil.get("name") if isinstance(perfil, dict) else None
+                    if isinstance(nome, str) and nome.strip():
+                        nomes[str(contato.get("wa_id") or "")] = " ".join(nome.split())[:120]
                 for mensagem in valor.get("messages") or []:
                     if not isinstance(mensagem, dict):
                         continue
@@ -116,15 +192,16 @@ class MetaProvider:
                     numero = str(mensagem.get("from") or "")
                     if not identidade or not numero.isdigit():
                         continue
+                    nome_contato = nomes.get(numero)
                     tipo = str(mensagem.get("type") or "")
                     if tipo == "text":
                         texto = (mensagem.get("text") or {}).get("body")
                         if not isinstance(texto, str) or not texto.strip():
                             continue
-                        entradas.append(MensagemEntrada(identidade, numero, texto))
+                        entradas.append(MensagemEntrada(identidade, numero, texto, nome_contato=nome_contato))
                     elif tipo:
                         entradas.append(
-                            MensagemEntrada(identidade, numero, "[Mídia recebida]", tipo="midia")
+                            MensagemEntrada(identidade, numero, "[Mídia recebida]", tipo="midia", nome_contato=nome_contato)
                         )
         return entradas
 

@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.utils import now as agora
 from app.models import AcessoRemoto, Chamado, Computador, Usuario
-from app.services.remoto import remoto_provider
+from app.services.remoto import provider_remoto_atual
 
 router = APIRouter()
 
@@ -181,6 +181,8 @@ async def listar_chamados(
         .scalars()
         .all()
     )
+    provider = provider_remoto_atual()
+    computadores_por_chamado = {chamado.id: chamado.computador for chamado in chamados}
     historico: dict[int, list[dict]] = {}
     for acesso in acessos:
         historico.setdefault(acesso.chamado_id, []).append(
@@ -190,6 +192,8 @@ async def listar_chamados(
                 "resultado": acesso.resultado,
                 "inicio_em": acesso.inicio_em.isoformat(),
                 "fim_em": acesso.fim_em.isoformat() if acesso.fim_em else None,
+                "acesso_url": provider.link_acesso(computadores_por_chamado[acesso.chamado_id])
+                if acesso.resultado == "aceito" and acesso.fim_em is None else None,
             }
         )
     return [
@@ -284,7 +288,8 @@ async def solicitar_acesso(
         )
     if chamado.status == "fechado":
         raise HTTPException(status_code=409, detail="Chamado fechado")
-    resultado = await remoto_provider.solicitar_acesso(chamado.computador)
+    provider = provider_remoto_atual()
+    resultado = await provider.solicitar_acesso(chamado.computador)
     if resultado not in {"aceito", "recusado", "cancelado", "simulado"}:
         raise HTTPException(status_code=502, detail="Resultado inválido do provider remoto")
     instante = agora()
@@ -306,7 +311,8 @@ async def solicitar_acesso(
     )
     db.add(acesso)
     await db.commit()
-    return {"id": acesso.id, "resultado": acesso.resultado}
+    return {"id": acesso.id, "resultado": acesso.resultado,
+            "acesso_url": provider.link_acesso(chamado.computador) if resultado == "aceito" else None}
 
 
 @router.post("/api/chamados/{chamado_id}/fechar")

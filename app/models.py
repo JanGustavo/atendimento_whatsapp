@@ -28,6 +28,8 @@ class Usuario(Base):
     role: Mapped[str] = mapped_column(String(20))
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     online: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    ultima_atividade_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    foto_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
     ultima_atribuicao_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     setor_interno_id: Mapped[int | None] = mapped_column(Integer)
 
@@ -67,6 +69,20 @@ class MensagemGrupo(Base):
     criada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
 
+class LeituraInterna(Base):
+    __tablename__ = "leituras_internas"
+    __table_args__ = (
+        CheckConstraint("tipo IN ('direta','grupo')"),
+        Index("uq_leitura_interna_usuario_tipo_alvo", "usuario_id", "tipo", "alvo_id", unique=True),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(10), nullable=False)
+    alvo_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    ultima_mensagem_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    lida_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SimuladorEstado(Base):
     __tablename__ = "simulador_estado"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -85,6 +101,8 @@ class Conversa(Base):
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     numero: Mapped[str] = mapped_column(String(30), index=True)
+    nome_contato: Mapped[str | None] = mapped_column(String(120))
+    foto_chave: Mapped[str | None] = mapped_column(String(40))
     setor_id: Mapped[int | None] = mapped_column(ForeignKey("setores.id"))
     atribuido_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="aberta", nullable=False)
@@ -107,6 +125,7 @@ class Mensagem(Base):
     autor_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
     origem: Mapped[str] = mapped_column(String(20))
     texto: Mapped[str] = mapped_column(Text)
+    imagem_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
     provider_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     envio_status: Mapped[str | None] = mapped_column(String(20))
     lida_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

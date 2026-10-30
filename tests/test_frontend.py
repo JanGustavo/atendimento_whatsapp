@@ -15,6 +15,8 @@ async def test_painel_react_e_api_isolada_por_papel(ambiente):
         "nome": "Vendedor A",
         "email": "a@teste.local",
         "role": "colaborador",
+        "foto_url": None,
+        "presenca_intervalo_segundos": 30,
     }
     lista = (await client.get("/api/atendimentos")).json()
     assert [item["id"] for item in lista] == [10]

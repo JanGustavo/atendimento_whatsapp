@@ -198,6 +198,7 @@ async def receber_mensagem(
             sqlite_insert(Conversa)
             .values(
                 numero=entrada.numero,
+                nome_contato=entrada.nome_contato,
                 etapa="menu_setor",
                 status="aberta",
                 timer_extensoes=0,
@@ -229,6 +230,8 @@ async def receber_mensagem(
     if resultado.rowcount == 0:
         await db.rollback()
         return
+    if entrada.nome_contato:
+        conversa.nome_contato = entrada.nome_contato
     if conversa.primeira_resposta_em is None and not em_expediente(now()):
         if conversa.etapa != "fora_expediente":
             conversa.etapa = "fora_expediente"

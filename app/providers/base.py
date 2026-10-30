@@ -11,9 +11,13 @@ class MensagemEntrada:
     texto: str
     de_mim: bool = False
     tipo: str = "texto"
+    nome_contato: str | None = None
 
 
 class WhatsAppProvider(Protocol):
     async def enviar_texto(self, numero: str, texto: str) -> str | None: ...
+    async def enviar_imagem(
+        self, numero: str, imagem_chave: str, legenda: str | None = None
+    ) -> str | None: ...
     def parse_webhook(self, payload: dict) -> MensagemEntrada | None: ...
     async def status(self) -> str: ...

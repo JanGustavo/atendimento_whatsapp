@@ -14,6 +14,11 @@ class SimuladorProvider:
     async def enviar_texto(self, numero: str, texto: str) -> str | None:
         return None
 
+    async def enviar_imagem(
+        self, numero: str, imagem_chave: str, legenda: str | None = None
+    ) -> str | None:
+        return None
+
     def parse_webhook(self, payload: dict) -> MensagemEntrada | None:
         try:
             return MensagemEntrada(
@@ -22,6 +27,7 @@ class SimuladorProvider:
                 str(payload["texto"]),
                 bool(payload.get("de_mim", False)),
                 str(payload.get("tipo", "texto")),
+                str(payload["nome_contato"]) if payload.get("nome_contato") else None,
             )
         except KeyError:
             return None

@@ -28,7 +28,8 @@ async def simulador_enviar(
     if cliente not in CLIENTES or not texto or len(texto) > 4000:
         raise HTTPException(status_code=422)
     entrada = simulador_provider.parse_webhook(
-        {"id": str(uuid4()), "numero": CLIENTES[cliente][1], "texto": texto}
+        {"id": str(uuid4()), "numero": CLIENTES[cliente][1], "texto": texto,
+         "nome_contato": CLIENTES[cliente][0]}
     )
     await receber_mensagem(db, simulador_provider, entrada)
     return {"ok": True}

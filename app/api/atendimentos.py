@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.requests import Request
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +16,8 @@ from app.core.database import get_db
 from app.core.utils import now
 from app.models import Atribuicao, Conversa, LeituraConversa, Mensagem, Setor, Usuario
 from app.providers import provider_para_numero
-from app.providers.meta import MetaTokenExpirado
+from app.providers.meta import MetaEnvioRecusado, MetaTokenExpirado
+from app.services.media import caminho_media, guardar_webp
 
 router = APIRouter(prefix="/api/atendimentos")
 
@@ -77,17 +79,31 @@ async def enviar(
     user: UsuarioAtual = Depends(get_current_user),
 ):
     conversa = await conversa_visivel(db, conversa_id, user)
-    dados = await form(request)
-    texto = dados.get("texto", "").strip()
-    if not texto or len(texto) > 4000:
-        raise HTTPException(status_code=422, detail="Texto inválido")
+    content_type = request.headers.get("content-type", "").split(";")[0].lower()
+    if content_type == "image/webp":
+        chave, arquivo = await guardar_webp(request)
+        texto = request.query_params.get("texto", "").strip()
+        if len(texto) > 4000:
+            arquivo.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail="Texto inválido")
+    else:
+        dados = await form(request)
+        texto = dados.get("texto", "").strip()
+        chave = None
+        arquivo = None
+        if not texto or len(texto) > 4000:
+            raise HTTPException(status_code=422, detail="Texto inválido")
     if conversa.status != "aberta":
+        if arquivo:
+            arquivo.unlink(missing_ok=True)
         raise HTTPException(status_code=409, detail="Conversa encerrada")
     condicoes = [Conversa.id == conversa.id, Conversa.status == "aberta"]
     if user.role != "gestor":
         condicoes.append(Conversa.atribuido_id == user.user_id)
     resultado = await db.execute(update(Conversa).where(*condicoes).values(status="aberta"))
     if resultado.rowcount != 1:
+        if arquivo:
+            arquivo.unlink(missing_ok=True)
         await db.rollback()
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
     mensagem = Mensagem(
@@ -95,6 +111,7 @@ async def enviar(
         autor_id=user.user_id,
         origem="humano",
         texto=texto,
+        imagem_chave=chave,
         envio_status="pendente",
         criada_em=now(),
     )
@@ -105,11 +122,17 @@ async def enviar(
         "supervisor": "Supervisor",
         "gestor": "Gestor",
     }[user.role]
-    texto_cliente = f"*{papel} {user.nome}*\n{texto}"
+    texto_cliente = f"*{papel} {user.nome}*\n{texto}" if texto else f"*{papel} {user.nome}*"
+    provider = provider_para_numero(conversa.numero)
     try:
-        mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(
-            conversa.numero, texto_cliente
-        )
+        if chave:
+            mensagem.provider_id = await provider.enviar_imagem(
+                conversa.numero, chave, texto_cliente
+            )
+        else:
+            mensagem.provider_id = await provider.enviar_texto(
+                conversa.numero, texto_cliente
+            )
     except MetaTokenExpirado:
         mensagem.envio_status = "falhou"
         await db.commit()
@@ -117,6 +140,10 @@ async def enviar(
             status_code=502,
             detail="O token da Meta expirou. Avise o gestor para atualizar a conexão antes de enviar novamente.",
         )
+    except MetaEnvioRecusado as falha:
+        mensagem.envio_status = "falhou"
+        await db.commit()
+        raise HTTPException(status_code=502, detail=str(falha))
     except Exception:
         mensagem.envio_status = "falhou"
         await db.commit()
@@ -184,10 +211,21 @@ async def reenviar(
         "supervisor": "Supervisor",
         "gestor": "Gestor",
     }[user.role]
+    texto_cliente = (
+        f"*{papel} {user.nome}*\n{mensagem.texto}"
+        if mensagem.texto
+        else f"*{papel} {user.nome}*"
+    )
+    provider = provider_para_numero(conversa.numero)
     try:
-        mensagem.provider_id = await provider_para_numero(conversa.numero).enviar_texto(
-            conversa.numero, f"*{papel} {user.nome}*\n{mensagem.texto}"
-        )
+        if mensagem.imagem_chave:
+            mensagem.provider_id = await provider.enviar_imagem(
+                conversa.numero, mensagem.imagem_chave, texto_cliente
+            )
+        else:
+            mensagem.provider_id = await provider.enviar_texto(
+                conversa.numero, texto_cliente
+            )
     except MetaTokenExpirado:
         mensagem.envio_status = "falhou"
         await db.commit()
@@ -195,6 +233,10 @@ async def reenviar(
             status_code=502,
             detail="O token da Meta expirou. Avise o gestor para atualizar a conexão antes de reenviar.",
         )
+    except MetaEnvioRecusado as falha:
+        mensagem.envio_status = "falhou"
+        await db.commit()
+        raise HTTPException(status_code=502, detail=str(falha))
     except Exception:
         mensagem.envio_status = "falhou"
         await db.commit()
@@ -217,6 +259,31 @@ async def reenviar(
     return {"id": mensagem.id, "envio_status": mensagem.envio_status}
 
 
+@router.get("/{conversa_id}/mensagens/{mensagem_id}/imagem")
+async def imagem_mensagem(
+    conversa_id: int,
+    mensagem_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    await conversa_visivel(db, conversa_id, user)
+    mensagem = await db.get(Mensagem, mensagem_id)
+    if (
+        mensagem is None
+        or mensagem.conversa_id != conversa_id
+        or not mensagem.imagem_chave
+    ):
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
+    arquivo = caminho_media(mensagem.imagem_chave)
+    if not arquivo.is_file():
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
+    return FileResponse(
+        arquivo,
+        media_type="image/webp",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
 @router.post("/{conversa_id}/transferir")
 async def transferir_atendimento(
     conversa_id: int,
@@ -225,7 +292,9 @@ async def transferir_atendimento(
     user: UsuarioAtual = Depends(get_current_user),
 ):
     conversa = await conversa_visivel(db, conversa_id, user)
-    if conversa.status != "aberta" or conversa.atribuido_id is None:
+    if conversa.status != "aberta":
+        raise HTTPException(status_code=409, detail="Conversa encerrada")
+    if user.role != "gestor" and (conversa.atribuido_id is None or conversa.atribuido_id != user.user_id):
         raise HTTPException(status_code=409, detail="Conversa sem atendente ativo")
     dados = await form(request)
     destino = dados.get("destino", "")
@@ -251,7 +320,7 @@ async def transferir_atendimento(
             raise HTTPException(status_code=422, detail="Responsável indisponível")
     else:
         raise HTTPException(status_code=422, detail="Destino inválido")
-    if alvo.id == conversa.atribuido_id:
+    if conversa.atribuido_id is not None and alvo.id == conversa.atribuido_id:
         raise HTTPException(status_code=409, detail="Conversa já atribuída a este atendente")
     instante = now()
     antigo_id = conversa.atribuido_id
@@ -261,8 +330,13 @@ async def transferir_atendimento(
     condicoes = [
         Conversa.id == conversa.id,
         Conversa.status == "aberta",
-        Conversa.atribuido_id == antigo_id,
     ]
+    if user.role != "gestor":
+        condicoes.append(Conversa.atribuido_id == user.user_id)
+    elif antigo_id is not None:
+        condicoes.append(Conversa.atribuido_id == antigo_id)
+    else:
+        condicoes.append(Conversa.atribuido_id.is_(None))
     resultado = await db.execute(
         update(Conversa)
         .where(*condicoes)
@@ -286,7 +360,7 @@ async def transferir_atendimento(
             conversa_id=conversa.id,
             de_usuario_id=antigo_id,
             para_usuario_id=alvo.id,
-            motivo="atendente",
+            motivo="atendente" if antigo_id is not None else "gestor",
             criada_em=instante,
         )
     )

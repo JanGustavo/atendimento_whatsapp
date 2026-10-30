@@ -169,3 +169,45 @@ async def test_transferencia_manual_registra_historico_e_avisa(ambiente, monkeyp
         ) == (2, 3, "gestor")
         assert aviso.envio_status == "enviada"
     assert falso.envios == [("551100001", "Seu atendimento foi transferido para Vendedor B.")]
+
+
+async def test_gestor_transfere_conversa_sem_atendente_atribuido(ambiente, monkeypatch):
+    client, maker = ambiente
+    falso = ProviderFalso()
+    monkeypatch.setattr("app.api.atendimentos.provider_para_numero", lambda _: falso)
+    async with maker() as db:
+        await receber_mensagem(
+            db, simulador_provider, MensagemEntrada("nova-unassigned", "55117777777", "ola")
+        )
+        conversa = (
+            await db.execute(select(Conversa).where(Conversa.numero == "55117777777"))
+        ).scalar_one()
+        assert conversa.atribuido_id is None
+        assert conversa.status == "aberta"
+        cid = conversa.id
+
+    # Colaborador não pode transferir conversa não atribuída a ele
+    await entrar(client, "a@teste.local")
+    resp_colab = await client.post(
+        f"/api/atendimentos/{cid}/transferir", data={"destino": "vendedor:3"}
+    )
+    assert resp_colab.status_code == 404
+
+    # Gestor pode transferir mesmo sem atendente atribuído previamente
+    await entrar(client, "gestor@teste.local")
+    resp_gestor = await client.post(
+        f"/api/atendimentos/{cid}/transferir", data={"destino": "vendedor:2"}
+    )
+    assert resp_gestor.status_code == 200
+
+    async with maker() as db:
+        conversa = await db.get(Conversa, cid)
+        assert conversa.atribuido_id == 2
+        assert conversa.etapa == "atribuida"
+        assert conversa.setor_id == 1
+        historico = (
+            await db.execute(select(Atribuicao).where(Atribuicao.conversa_id == cid))
+        ).scalar_one()
+        assert historico.de_usuario_id is None
+        assert historico.para_usuario_id == 2
+        assert historico.motivo == "gestor"

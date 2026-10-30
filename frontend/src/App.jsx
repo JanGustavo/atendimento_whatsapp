@@ -3,6 +3,8 @@ import Chamados, { ChamadosVendedor } from './Chamados.jsx'
 import { messageDay } from './dates.js'
 import Interno from './Interno.jsx'
 import Perfil from './Perfil.jsx'
+import ModalImagem from './ModalImagem.jsx'
+import { converterWebp } from './images.js'
 
 const roleName = { gestor: 'Gestor', supervisor: 'Supervisor', colaborador: 'Colaborador' }
 const stageName = {
@@ -165,6 +167,8 @@ function Icon({ name, size = 19 }) {
       </>
     ),
     arrow: <path d="m5 12 14 0m-6-6 6 6-6 6" />,
+    clip: <path d="m21.5 11.5-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
+    fechar: <path d="M18 6 6 18M6 6l12 12" />,
     ticket: (
       <>
         <path d="M4 3h16v18l-4-2-4 2-4-2-4 2z" />
@@ -266,10 +270,20 @@ function Login({ onLogin, busy, error }) {
   )
 }
 
-function MessageBubbles({ messages, simulator = false, onRetry, currentUserId, busy = false }) {
+function MessageBubbles({ messages, simulator = false, onRetry, onImagem, currentUserId, busy = false }) {
   const bottom = React.useRef(null)
+  const colado = useRef(true)
+  const montado = useRef(false)
+  const total = useRef(0)
+  const ultima = messages[messages.length - 1]
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+    const cresceu = messages.length > total.current
+    total.current = messages.length
+    const propria = simulator ? ultima?.origem === 'cliente' : ultima?.origem === 'humano'
+    if (cresceu && propria) colado.current = true
+    if (!colado.current || !bottom.current) return
+    bottom.current.scrollIntoView({ block: 'end', behavior: montado.current ? 'smooth' : 'auto' })
+    montado.current = true
   }, [messages.length])
   if (!messages.length)
     return (
@@ -282,7 +296,13 @@ function MessageBubbles({ messages, simulator = false, onRetry, currentUserId, b
       </div>
     )
   return (
-    <div className="messages-scroll">
+    <div
+      className="messages-scroll"
+      onScroll={(event) => {
+        const el = event.currentTarget
+        colado.current = el.scrollHeight - el.scrollTop - el.clientHeight < 140
+      }}
+    >
       {messages.map((message, index) => {
         const outgoing = simulator ? message.origem === 'cliente' : message.origem === 'humano'
         const label =
@@ -302,7 +322,23 @@ function MessageBubbles({ messages, simulator = false, onRetry, currentUserId, b
             <div className={`message-row ${outgoing ? 'message-outgoing' : ''}`}>
               <div className={`message-bubble ${outgoing ? 'message-bubble-outgoing' : ''}`}>
                 <div className="message-label">{label}</div>
-                <div className="message-text">{message.texto}</div>
+                {message.imagem_url && (
+                  <button
+                    type="button"
+                    className="int-photo"
+                    onClick={() => onImagem?.(message.imagem_url, 'Imagem da mensagem')}
+                    aria-label="Ampliar imagem"
+                    title="Ampliar imagem"
+                  >
+                    <img
+                      src={message.imagem_url}
+                      alt="Imagem da conversa. Clique para ampliar."
+                      loading="lazy"
+                      draggable="false"
+                    />
+                  </button>
+                )}
+                {message.texto && <div className="message-text">{message.texto}</div>}
                 <time>
                   {time(message.criada_em)}
                   {!simulator && message.origem !== 'cliente' && (
@@ -359,6 +395,12 @@ function AtendimentoTags({ conversa }) {
   )
 }
 
+const atendimentoFiltros = [
+  { id: 'todas', nome: 'Todas' },
+  { id: 'nao_lidas', nome: 'Não lidas' },
+  { id: 'abertas', nome: 'Abertas' },
+]
+
 function Inbox({
   me,
   conversations,
@@ -371,25 +413,119 @@ function Inbox({
   onRetry,
   onClose,
   onTransfer,
+  onUploadPhoto,
+  onImagem,
   busy,
 }) {
   const [draft, setDraft] = useState('')
   const [destino, setDestino] = useState('')
+  const [filtro, setFiltro] = useState('todas')
+  const [imagemWpp, setImagemWpp] = useState(null)
+  const [previaWpp, setPreviaWpp] = useState(null)
   const destinoRef = useRef(null)
+  const fotoRef = useRef(null)
+  const arquivoWppRef = useRef(null)
+  const campoWppRef = useRef(null)
+  // Sempre aponta para a conversa aberta agora: respostas assíncronas de outra conversa são ignoradas.
+  const selectedIdRef = useRef(selectedId)
+  selectedIdRef.current = selectedId
   useEffect(() => setDraft(''), [selectedId])
   useEffect(() => setDestino(''), [selectedId])
-  const selected = detail?.conversa
+  useEffect(() => { setImagemWpp(null); setPreviaWpp(null) }, [selectedId])
+
+  useEffect(() => {
+    if (!imagemWpp) { setPreviaWpp(null); return }
+    const url = URL.createObjectURL(imagemWpp)
+    setPreviaWpp(url)
+    return () => URL.revokeObjectURL(url)
+  }, [imagemWpp])
+
+  useEffect(() => {
+    const el = campoWppRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+  }, [draft])
+
+  function escolherImagemWpp(escolhida) {
+    if (!escolhida) return
+    if (!escolhida.type.startsWith('image/')) return
+    setImagemWpp(escolhida)
+  }
+
+  function removerImagemWpp() {
+    setImagemWpp(null)
+    if (arquivoWppRef.current) arquivoWppRef.current.value = ''
+  }
+
+  // Só exibe o detalhe que pertence à conversa selecionada; um detalhe antigo nunca aparece.
+  const temSelecao = selectedId !== null && selectedId !== undefined
+  const atual = temSelecao && detail?.conversa?.id === selectedId ? detail : null
+  const selected = atual?.conversa
+
+  const contagens = useMemo(
+    () => ({
+      todas: conversations.length,
+      nao_lidas: conversations.filter((item) => item.nao_lidas > 0).length,
+      abertas: conversations.filter((item) => item.status === 'aberta').length,
+    }),
+    [conversations],
+  )
+  const visiveis = useMemo(
+    () =>
+      filtro === 'nao_lidas'
+        ? conversations.filter((item) => item.nao_lidas > 0)
+        : filtro === 'abertas'
+          ? conversations.filter((item) => item.status === 'aberta')
+          : conversations,
+    [conversations, filtro],
+  )
+  const mensagemVazia = search.trim()
+    ? 'Nenhuma conversa encontrada para essa busca.'
+    : filtro === 'nao_lidas'
+      ? 'Nenhuma conversa com mensagens não lidas.'
+      : filtro === 'abertas'
+        ? 'Nenhuma conversa aberta no momento.'
+        : 'Nenhuma conversa encontrada.'
+
+  async function enviar() {
+    const texto = draft.trim()
+    if ((!texto && !imagemWpp) || busy || !selected) return
+    if (texto.toLowerCase() === '/transferir') {
+      setDraft('')
+      destinoRef.current?.focus()
+      return
+    }
+    const alvo = selected.id
+    if ((await onSend(alvo, texto, imagemWpp)) && selectedIdRef.current === alvo) {
+      setDraft('')
+      removerImagemWpp()
+    }
+  }
+  const botaoVoltar = (
+    <button
+      type="button"
+      className="atendimento-voltar"
+      aria-label="Voltar para a lista de conversas"
+      onClick={() => onSelect(null)}
+    >
+      <Icon name="arrow" size={18} />
+    </button>
+  )
+
   return (
-    <div className="inbox-layout">
-      <aside className="conversation-pane">
+    <div className={`inbox-layout atendimento-layout ${temSelecao ? 'atendimento-com-conversa' : ''}`}>
+      <aside className="conversation-pane" aria-label="Conversas">
         <div className="pane-heading">
           <div>
             <div className="eyebrow">CENTRAL</div>
             <h2>{me.role === 'gestor' ? 'Conversas' : 'Meus atendimentos'}</h2>
           </div>
-          <span className="count-chip">{conversations.length}</span>
+          <span className="count-chip" title="Total de conversas">
+            {conversations.length}
+          </span>
         </div>
-        <div className="search-box">
+        <div className="search-box" role="search">
           <Icon name="search" size={17} />
           <input
             value={search}
@@ -398,37 +534,88 @@ function Inbox({
             aria-label="Buscar conversas"
           />
         </div>
-        <div className="conversation-items">
-          {conversations.map((conversa) => (
+        <div className="atendimento-filtros" role="group" aria-label="Filtrar conversas">
+          {atendimentoFiltros.map((item) => (
             <button
-              className={`conversation-item ${selectedId === conversa.id ? 'selected' : ''}`}
-              key={conversa.id}
-              onClick={() => onSelect(conversa.id)}
+              type="button"
+              key={item.id}
+              className={`atendimento-filtro ${filtro === item.id ? 'atendimento-filtro-ativo' : ''}`}
+              aria-pressed={filtro === item.id}
+              onClick={() => setFiltro(item.id)}
             >
-              <span className="conversation-avatar">{conversa.numero.slice(-2)}</span>
-              <span className="conversation-item-main">
-                <strong>{conversa.numero}</strong>
-                <AtendimentoTags conversa={conversa} />
-              </span>
-              <span className="conversation-item-meta">
-                <time>{time(conversa.criada_em).split(',').pop()}</time>
-                {conversa.nao_lidas > 0 ? (
-                  <b className="nav-count">{conversa.nao_lidas}</b>
-                ) : (
-                  <i
-                    className={
-                      conversa.status === 'aberta' ? 'status-dot' : 'status-dot status-dot-muted'
-                    }
-                  />
-                )}
-              </span>
+              {item.nome}
+              <span>{contagens[item.id]}</span>
             </button>
           ))}
-          {!conversations.length && <div className="empty-list">Nenhuma conversa encontrada.</div>}
         </div>
+        {visiveis.length ? (
+          <ul className="conversation-items atendimento-lista">
+            {visiveis.map((conversa) => {
+              const ativa = selectedId === conversa.id
+              const naoLidas = conversa.nao_lidas > 0
+              return (
+                <li key={conversa.id}>
+                  <button
+                    type="button"
+                    className={`conversation-item atendimento-item ${ativa ? 'selected' : ''} ${naoLidas ? 'atendimento-item-nova' : ''}`}
+                    aria-current={ativa ? 'true' : undefined}
+                    onClick={() => onSelect(conversa.id)}
+                  >
+                    <span className="conversation-avatar" aria-hidden="true">
+                      {conversa.foto_url ? <img className="int-avatar-photo" src={conversa.foto_url} alt="" /> : (conversa.nome_contato?.trim().slice(0, 1).toUpperCase() || conversa.numero.slice(-2))}
+                    </span>
+                    <span className="conversation-item-main">
+                      <strong className="atendimento-numero">{conversa.numero}</strong>
+                      <small className="atendimento-contato">{conversa.nome_contato || 'Contato sem nome salvo'}</small>
+                      <AtendimentoTags conversa={conversa} />
+                      {conversa.etapa && stageName[conversa.etapa] && (
+                        <small className="atendimento-item-etapa">{stageName[conversa.etapa]}</small>
+                      )}
+                    </span>
+                    <span className="conversation-item-meta">
+                      <time>{time(conversa.criada_em).split(',').pop()}</time>
+                      {naoLidas ? (
+                        <>
+                          <b className="nav-count" aria-hidden="true">
+                            {conversa.nao_lidas}
+                          </b>
+                          <span className="atendimento-sr">
+                            {conversa.nao_lidas === 1
+                              ? '1 mensagem não lida'
+                              : `${conversa.nao_lidas} mensagens não lidas`}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <i
+                            aria-hidden="true"
+                            className={
+                              conversa.status === 'aberta'
+                                ? 'status-dot'
+                                : 'status-dot status-dot-muted'
+                            }
+                          />
+                          <span className="atendimento-sr">
+                            {conversa.status === 'aberta' ? 'Aberta' : 'Encerrada'}
+                          </span>
+                        </>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        ) : (
+          <div className="conversation-items">
+            <div className="empty-list" role="status">
+              {mensagemVazia}
+            </div>
+          </div>
+        )}
       </aside>
-      <section className="chat-pane">
-        {!selected ? (
+      <section className="chat-pane" aria-label="Conversa selecionada">
+        {!temSelecao ? (
           <div className="chat-placeholder">
             <div className="placeholder-mark">
               <Icon name="chat" size={42} />
@@ -436,52 +623,103 @@ function Inbox({
             <h2>Seu atendimento, em um só lugar.</h2>
             <p>Escolha uma conversa para acompanhar o histórico e responder.</p>
           </div>
+        ) : !selected ? (
+          <>
+            <div className="chat-header atendimento-cabecalho">
+              <div className="chat-person">
+                {botaoVoltar}
+                <strong>Abrindo conversa…</strong>
+              </div>
+            </div>
+            <div className="chat-placeholder" role="status" aria-live="polite">
+              <p>Carregando mensagens…</p>
+            </div>
+          </>
         ) : (
           <>
-            <div className="chat-header">
+            <div className="chat-header atendimento-cabecalho">
               <div className="chat-person">
-                <div className="conversation-avatar large">{selected.numero.slice(-2)}</div>
-                <div>
-                  <AtendimentoTags conversa={selected} />
+                {botaoVoltar}
+                <div className="conversation-avatar large" aria-hidden="true">
+                  {selected.foto_url ? <img className="int-avatar-photo" src={selected.foto_url} alt="" /> : (selected.nome_contato?.trim().slice(0, 1).toUpperCase() || selected.numero.slice(-2))}
+                </div>
+                <div className="atendimento-titulo">
                   <h3>{selected.numero}</h3>
+                  <small className="atendimento-contato">{selected.nome_contato || 'Contato sem nome salvo'}</small>
+                  <AtendimentoTags conversa={selected} />
                 </div>
               </div>
+              <input ref={fotoRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={async (event) => {
+                const arquivo = event.target.files?.[0]
+                event.target.value = ''
+                if (arquivo) await onUploadPhoto(selected.id, arquivo)
+              }} />
+              <button type="button" className="atendimento-foto-botao" disabled={busy} onClick={() => fotoRef.current?.click()} title="Adicionar foto fornecida pelo cliente">{selected.foto_url ? 'Trocar foto' : 'Adicionar foto'}</button>
               <Badge status={selected.status} />
             </div>
-            <div className="chat-stage">
-              <span>Etapa: {stageName[selected.etapa] || selected.etapa}</span>
-              {detail.mensagens.some((item) => item.origem === 'cliente') && (
-                <span>
-                  {detail.visualizada_pelo_atendente_em
-                    ? `Última mensagem vista pelo atendente em ${time(detail.visualizada_pelo_atendente_em)}`
+            <div className="chat-stage atendimento-stage">
+              <span className="atendimento-chip">
+                Etapa: {stageName[selected.etapa] || selected.etapa}
+              </span>
+              {atual.mensagens.some((item) => item.origem === 'cliente') && (
+                <span
+                  className={`atendimento-chip ${atual.visualizada_pelo_atendente_em ? 'atendimento-chip-ok' : 'atendimento-chip-alerta'}`}
+                >
+                  {atual.visualizada_pelo_atendente_em
+                    ? `Última mensagem vista pelo atendente em ${time(atual.visualizada_pelo_atendente_em)}`
                     : 'Última mensagem ainda não visualizada pelo atendente'}
                 </span>
               )}
               {selected.timer_prazo_em && !selected.primeira_resposta_em && (
-                <span>Prazo: {time(selected.timer_prazo_em)}</span>
+                <span className="atendimento-chip atendimento-chip-alerta">
+                  Prazo: {time(selected.timer_prazo_em)}
+                </span>
               )}
             </div>
             <MessageBubbles
-              messages={detail.mensagens}
+              key={selected.id}
+              messages={atual.mensagens}
               currentUserId={me.id}
               onRetry={(messageId) => onRetry(selected.id, messageId)}
+              onImagem={onImagem}
               busy={busy}
             />
             {selected.status === 'aberta' ? (
-              <div className="chat-composer">
+              <div className="chat-composer atendimento-composer">
+                {imagemWpp && (
+                  <div className="int-attachment">
+                    {previaWpp && <img src={previaWpp} alt="" />}
+                    <span><strong>{imagemWpp.name}</strong><small>{Math.round(imagemWpp.size / 1024)} KB</small></span>
+                    <button type="button" className="int-icon-btn small" onClick={removerImagemWpp} aria-label="Remover imagem">
+                      <Icon name="fechar" size={16} />
+                    </button>
+                  </div>
+                )}
                 <form
-                  onSubmit={async (event) => {
+                  onSubmit={(event) => {
                     event.preventDefault()
-                    if (!draft.trim() || busy) return
-                    if (draft.trim().toLowerCase() === '/transferir') {
-                      setDraft('')
-                      destinoRef.current?.focus()
-                      return
-                    }
-                    if (await onSend(selected.id, draft.trim())) setDraft('')
+                    enviar()
                   }}
                 >
+                  <input
+                    ref={arquivoWppRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={(e) => escolherImagemWpp(e.target.files?.[0])}
+                  />
+                  <button
+                    type="button"
+                    className="int-icon-btn"
+                    onClick={() => arquivoWppRef.current?.click()}
+                    disabled={busy}
+                    aria-label="Anexar imagem"
+                    title="Anexar imagem"
+                  >
+                    <Icon name="clip" size={20} />
+                  </button>
                   <textarea
+                    ref={campoWppRef}
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                     onKeyDown={(event) => {
@@ -493,62 +731,71 @@ function Inbox({
                       }
                       if (event.key === 'Enter' && (event.ctrlKey || event.shiftKey)) {
                         event.preventDefault()
-                        if (!busy && draft.trim()) event.currentTarget.form?.requestSubmit()
+                        if (!busy && (draft.trim() || imagemWpp)) event.currentTarget.form?.requestSubmit()
                       }
                     }}
                     placeholder="Escreva sua resposta..."
-                    rows="2"
+                    aria-label="Resposta ao cliente"
+                    aria-describedby="atendimento-dica"
+                    rows="1"
                     maxLength="4000"
-                    required
+                    required={!imagemWpp}
                   />
                   <button
                     className="button button-primary"
-                    disabled={busy || !draft.trim()}
+                    disabled={busy || (!draft.trim() && !imagemWpp)}
                     title="Enviar resposta"
                   >
-                    <Icon name="send" size={18} />
-                    <span>Enviar</span>
+                    <Icon name="send" size={18} /><span>Enviar</span>
                   </button>
                 </form>
-                <small className="composer-hint">
+                <small className="composer-hint" id="atendimento-dica">
                   Ctrl+Enter ou Shift+Enter para enviar · /transferir para escolher destino
                 </small>
-                <div className="transfer-controls">
-                  <label>
-                    Transferir para{' '}
-                    <select
-                      ref={destinoRef}
-                      value={destino}
-                      onChange={(event) => setDestino(event.target.value)}
+                <div className="atendimento-acoes">
+                  <div className="transfer-controls">
+                    <label>
+                      Transferir para{' '}
+                      <select
+                        ref={destinoRef}
+                        value={destino}
+                        onChange={(event) => setDestino(event.target.value)}
+                      >
+                        <option value="">Escolha um atendente ou setor</option>
+                        {(atual.destinos || []).map((item) => (
+                          <option key={item.valor} value={item.valor}>
+                            {item.nome}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="button button-soft"
+                      disabled={busy || !destino}
+                      onClick={async () => {
+                        const alvo = selected.id
+                        if ((await onTransfer(alvo, destino)) && selectedIdRef.current === alvo)
+                          setDestino('')
+                      }}
                     >
-                      <option value="">Escolha um atendente ou setor</option>
-                      {(detail.destinos || []).map((item) => (
-                        <option key={item.valor} value={item.valor}>
-                          {item.nome}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      Transferir
+                    </button>
+                  </div>
                   <button
-                    className="button button-soft"
-                    disabled={busy || !destino}
-                    onClick={async () => {
-                      if (await onTransfer(selected.id, destino)) setDestino('')
-                    }}
+                    type="button"
+                    className="text-button atendimento-encerrar"
+                    disabled={busy}
+                    onClick={() => onClose(selected.id)}
                   >
-                    Transferir
+                    Encerrar conversa
                   </button>
                 </div>
-                <button
-                  className="text-button"
-                  disabled={busy}
-                  onClick={() => onClose(selected.id)}
-                >
-                  Encerrar conversa
-                </button>
               </div>
             ) : (
-              <div className="closed-note">Esta conversa foi encerrada.</div>
+              <div className="closed-note" role="status">
+                Esta conversa foi encerrada.
+              </div>
             )}
           </>
         )}
@@ -1160,6 +1407,7 @@ function Simulator({ data, client, setClient, onSend, busy }) {
 
 export default function App() {
   const [me, setMe] = useState(undefined)
+  const [imagemModal, setImagemModal] = useState(null)
   const [page, setPage] = useState('inbox')
   const [conversations, setConversations] = useState([])
   const [selectedId, setSelectedId] = useState(null)
@@ -1176,11 +1424,22 @@ export default function App() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [naoLidas, setNaoLidas] = useState({ whatsapp: [], interno: [] })
+  const [internoNaoLidasTotal, setInternoNaoLidasTotal] = useState(0)
   const naoLidasRef = useRef({ whatsapp: [], interno: [] })
   const [avisoEvento, setAvisoEvento] = useState(null)
   const cursores = useRef({ whatsapp: 0, interno: 0 })
   const eventosProntos = useRef(false)
   const [colegaAlvoId, setColegaAlvoId] = useState(null)
+  // Controle de respostas fora de ordem no polling: só a consulta mais recente, da conversa e da busca
+  // atuais, pode atualizar a tela.
+  const selectedIdRef = useRef(null)
+  selectedIdRef.current = selectedId
+  const paginaRef = useRef(page)
+  paginaRef.current = page
+  const buscaRef = useRef(search)
+  buscaRef.current = search
+  const listaSeq = useRef(0)
+  const detalheSeq = useRef(0)
 
   useEffect(() => {
     getJSON('/api/me')
@@ -1190,6 +1449,34 @@ export default function App() {
       })
       .catch(() => setMe(null))
   }, [])
+
+  useEffect(() => {
+    if (!me) return
+    const batida = async () => {
+      if (document.visibilityState !== 'visible') return
+      try {
+        await fetch('/api/presenca', { method: 'POST', credentials: 'same-origin' })
+      } catch { /* A próxima consulta tenta novamente. */ }
+    }
+    batida()
+    const intervalo = setInterval(batida, (me.presenca_intervalo_segundos || 30) * 1000)
+    document.addEventListener('visibilitychange', batida)
+    return () => { clearInterval(intervalo); document.removeEventListener('visibilitychange', batida) }
+  }, [me?.id])
+
+  useEffect(() => {
+    if (!me) return
+    let ativo = true
+    const atualizar = async () => {
+      try {
+        const resumo = await getJSON('/api/interno/conversas')
+        if (ativo) setInternoNaoLidasTotal(resumo.nao_lidas)
+      } catch { /* Mantém o último contador até a próxima consulta. */ }
+    }
+    atualizar()
+    const intervalo = setInterval(atualizar, 3000)
+    return () => { ativo = false; clearInterval(intervalo) }
+  }, [me?.id])
 
   useEffect(() => {
     if (!me) return
@@ -1307,23 +1594,30 @@ export default function App() {
 
   const refreshConversations = useCallback(async () => {
     if (!me) return
+    const seq = ++listaSeq.current
     const query = new URLSearchParams()
-    if (page === 'inbox' && search.trim()) query.set('q', search.trim())
+    if (paginaRef.current === 'inbox' && buscaRef.current.trim())
+      query.set('q', buscaRef.current.trim())
     try {
-      setConversations(await getJSON(`/api/atendimentos?${query}`))
+      const dados = await getJSON(`/api/atendimentos?${query}`)
+      if (seq === listaSeq.current) setConversations(dados)
     } catch (failure) {
-      setError(failure.message)
+      if (seq === listaSeq.current) setError(failure.message)
     }
   }, [me, page, search])
 
   const refreshDetail = useCallback(async () => {
-    if (!selectedId || page !== 'inbox') return
+    const id = selectedId
+    if (!id || page !== 'inbox' || selectedIdRef.current !== id) return
+    const seq = ++detalheSeq.current
+    const vigente = () => seq === detalheSeq.current && selectedIdRef.current === id
     try {
-      setDetail(await getJSON(`/api/atendimentos/${selectedId}`))
+      const dados = await getJSON(`/api/atendimentos/${id}`)
+      if (vigente()) setDetail(dados)
     } catch (failure) {
+      if (!vigente()) return
       setDetail(null)
-      if (failure.status === 404)
-        setSelectedId((current) => (current === selectedId ? null : current))
+      if (failure.status === 404) setSelectedId((current) => (current === id ? null : current))
       else setError(failure.message)
     }
   }, [selectedId, page])
@@ -1365,13 +1659,19 @@ export default function App() {
     if (!me) return
     refreshConversations()
     const interval = setInterval(refreshConversations, 3000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      listaSeq.current++
+    }
   }, [me, page, refreshConversations])
   useEffect(() => {
     if (!selectedId || page !== 'inbox') return
     refreshDetail()
     const interval = setInterval(refreshDetail, 3000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      detalheSeq.current++
+    }
   }, [selectedId, page, refreshDetail])
   useEffect(() => {
     if (
@@ -1494,6 +1794,41 @@ export default function App() {
     }
   }
 
+  async function actionRaw(path, options, success = 'Alterações salvas.') {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch(path, {
+        credentials: 'same-origin',
+        ...options,
+      })
+      if (!response.ok) {
+        let message = `Não foi possível concluir (${response.status}).`
+        try {
+          const data = await response.json()
+          if (data.detail) message = typeof data.detail === 'string' ? data.detail : message
+        } catch {}
+        throw new Error(message)
+      }
+      setNotice(success)
+      await Promise.all([
+        refreshConversations(),
+        refreshDetail(),
+        refreshConfig(),
+        refreshSimulator(),
+        refreshTickets(),
+      ])
+      return true
+    } catch (failure) {
+      setError(failure.message)
+      await Promise.all([refreshConversations(), refreshDetail(), refreshTickets()])
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function navigate(next) {
     setPage(next)
     window.history.pushState({}, '', routeByPage[next])
@@ -1568,8 +1903,8 @@ export default function App() {
             >
               <Icon name="chat" />
               Chat interno
-              {naoLidas.interno.length > 0 && (
-                <span className="nav-count">{naoLidas.interno.length}</span>
+              {internoNaoLidasTotal > 0 && (
+                <span className="nav-count">{internoNaoLidasTotal}</span>
               )}
             </button>
             <button
@@ -1607,7 +1942,16 @@ export default function App() {
             Central FortGiro <small>Atendimento em operação</small>
           </div>
           <div className="sidebar-user">
-            <span className="user-avatar">{initials(me.nome)}</span>
+            <button
+              type="button"
+              className="user-avatar user-avatar-btn"
+              onClick={() => me.foto_url && setImagemModal({ url: me.foto_url, titulo: me.nome })}
+              disabled={!me.foto_url}
+              title={me.foto_url ? 'Visualizar foto do perfil' : undefined}
+              aria-label={me.foto_url ? 'Visualizar foto do perfil' : 'Foto do perfil'}
+            >
+              {me.foto_url ? <img className="int-avatar-photo" src={me.foto_url} alt="" /> : initials(me.nome)}
+            </button>
             <span>
               <strong>{me.nome}</strong>
               <small>{roleName[me.role] || me.role}</small>
@@ -1627,7 +1971,16 @@ export default function App() {
             <span className="topbar-date">
               {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
             </span>
-            <span className="topbar-avatar">{initials(me.nome)}</span>
+            <button
+              type="button"
+              className="topbar-avatar topbar-avatar-btn"
+              onClick={() => me.foto_url && setImagemModal({ url: me.foto_url, titulo: me.nome })}
+              disabled={!me.foto_url}
+              title={me.foto_url ? 'Visualizar foto do perfil' : undefined}
+              aria-label={me.foto_url ? 'Visualizar foto do perfil' : 'Foto do perfil'}
+            >
+              {me.foto_url ? <img className="int-avatar-photo" src={me.foto_url} alt="" /> : initials(me.nome)}
+            </button>
           </div>
         </header>
         {avisoEvento && (
@@ -1670,9 +2023,28 @@ export default function App() {
             search={search}
             setSearch={setSearch}
             busy={busy}
-            onSend={(id, texto) =>
-              action(`/api/atendimentos/${id}/mensagens`, { texto }, 'Resposta enviada.')
-            }
+            onSend={async (id, texto, imagem) => {
+              if (imagem) {
+                try {
+                  const webp = await converterWebp(imagem)
+                  const query = texto ? `?${new URLSearchParams({ texto })}` : ''
+                  return await actionRaw(
+                    `/api/atendimentos/${id}/mensagens${query}`,
+                    {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'image/webp' },
+                      body: webp,
+                    },
+                    'Resposta enviada.',
+                  )
+                } catch (falha) {
+                  setError(falha.message)
+                  return false
+                }
+              }
+              return action(`/api/atendimentos/${id}/mensagens`, { texto }, 'Resposta enviada.')
+            }}
+            onImagem={(url, titulo) => setImagemModal({ url, titulo: titulo || 'Imagem da mensagem' })}
             onRetry={(id, messageId) =>
               action(
                 `/api/atendimentos/${id}/mensagens/${messageId}/reenviar`,
@@ -1688,6 +2060,21 @@ export default function App() {
                 true,
               )
             }
+            onUploadPhoto={async (id, arquivo) => {
+              setBusy(true)
+              setError('')
+              try {
+                const webp = await converterWebp(arquivo, 512)
+                const resposta = await fetch(`/api/atendimentos/${id}/foto`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'image/webp' }, body: webp })
+                if (!resposta.ok) throw new Error('Não foi possível salvar a foto do contato.')
+                await Promise.all([refreshConversations(), refreshDetail()])
+                setNotice('Foto do contato salva pela equipe.')
+              } catch (falha) {
+                setError(falha.message)
+              } finally {
+                setBusy(false)
+              }
+            }}
             onClose={(id) =>
               action(`/api/atendimentos/${id}/encerrar`, {}, 'Conversa encerrada.').then((ok) => {
                 if (ok) {
@@ -1794,9 +2181,29 @@ export default function App() {
             me={me}
             abrirColegaId={colegaAlvoId}
             onOpen={(id) => marcarLidas('interno', id)}
+            onUnreadChange={setInternoNaoLidasTotal}
+            onVisualizarImagem={(url, titulo) => setImagemModal({ url, titulo })}
           />
         )}
-        {page === 'perfil' && <Perfil me={me} />}
+        {page === 'perfil' && (
+          <Perfil
+            me={me}
+            onVisualizarFoto={(url, titulo) => setImagemModal({ url, titulo })}
+            onEnviarFoto={async (arquivo) => {
+              const corpo = await converterWebp(arquivo, 512)
+              const resposta = await fetch('/api/me/foto', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'image/webp' },
+                body: corpo,
+              })
+              if (!resposta.ok) throw new Error('Não foi possível enviar a foto.')
+              const dados = await resposta.json()
+              setMe((anterior) => ({ ...anterior, foto_url: dados.foto_url }))
+              return true
+            }}
+          />
+        )}
         {page === 'simulator' && config?.simulador_ativo && (
           <Simulator
             data={simData}
@@ -1809,6 +2216,14 @@ export default function App() {
           />
         )}
       </main>
+      {imagemModal && (
+        <ModalImagem
+          url={imagemModal.url}
+          titulo={imagemModal.titulo}
+          alt={imagemModal.alt}
+          onFechar={() => setImagemModal(null)}
+        />
+      )}
     </div>
   )
 }

@@ -303,6 +303,12 @@ async def cadastrar_computador(
         raise HTTPException(status_code=422, detail="Dados do computador inválidos")
     if (await db.execute(select(Computador.id).where(Computador.nome == nome))).first():
         raise HTTPException(status_code=409, detail="Nome do computador já existe")
+    if mesh_node_id:
+        partes = mesh_node_id.split("/")
+        if len(partes) != 3 or partes[0] != "node" or not partes[2]:
+            raise HTTPException(status_code=422, detail="Mesh node ID invalido")
+        if (await db.execute(select(Computador.id).where(Computador.mesh_node_id == mesh_node_id))).first():
+            raise HTTPException(status_code=409, detail="No MeshCentral ja cadastrado")
     computador = Computador(nome=nome, grupo=grupo, dono_id=dono.id, mesh_node_id=mesh_node_id)
     db.add(computador)
     await db.commit()
@@ -497,7 +503,7 @@ async def vincular_no_meshcentral(
     dados = await form(request)
     nodeid = dados.get("mesh_node_id", "").strip()
     if (not nodeid.startswith("node/") or len(nodeid.split("/")) != 3
-            or any(not parte for parte in nodeid.split("/")) or len(nodeid) > 255):
+            or not nodeid.split("/")[2] or len(nodeid) > 255):
         raise HTTPException(status_code=422, detail="Informe o ID completo node/<dominio>/<identificador>")
     pc = await db.get(Computador, computador_id)
     if pc is None:

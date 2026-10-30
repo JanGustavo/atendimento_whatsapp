@@ -25,6 +25,11 @@ jobs:
         run: pytest tests/ -q
       - name: Sintaxe da migracao
         run: python -m compileall -q app migrations
+      - name: Migracoes SQLite do zero
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci-meshcentral.sqlite
+          JWT_SECRET: segredo-somente-para-o-runner-do-ci
+        run: alembic upgrade head
   frontend:
     runs-on: ubuntu-latest
     defaults:

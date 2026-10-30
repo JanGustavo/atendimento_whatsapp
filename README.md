@@ -53,3 +53,22 @@ Quando `REMOTO_PROVIDER=meshcentral`, a solicitação de suporte começa em `pen
 
 
 As regras para pop-up no sistema operacional, barra de privacidade durante uma sessão real e auditoria completa estão descritas em [Consentimento e auditoria MeshCentral](docs/meshcentral-consentimento-auditoria.md). A janela atual de autorização é exibida apenas no painel React aberto; não substitui o consentimento nativo do agente.
+
+
+## Eventos reais do MeshCentral (integração opt-in)
+
+A FortGiro pode observar o WebSocket autenticado do MeshCentral para identificar
+**início e fim reais do relay de desktop** (`relaylog`, protocolo 2), registrar
+ID da sessão, computador, técnico e horários na tabela `sessoes_meshcentral`.
+Sessões sem correspondência a consentimento ficam sinalizadas na auditoria.
+
+A funcionalidade inicia **desativada** e só funciona com servidor MeshCentral
+acessível, agente oficial instalado no PC, conta de auditoria e vínculos de
+identidade configurados. O banner React reflete os últimos eventos observados,
+podendo estar desatualizado em caso de desconexão do monitor.
+
+Consulte [Instalação, vínculo de agentes e auditoria de eventos](docs/meshcentral-integracao-eventos.md)
+antes de ativar. **Ainda não há disparo nem encerramento de conexão real pela
+FortGiro, nem enforcement do consentimento React no servidor MeshCentral.**
+A confirmação de acesso nativa e a barra de privacidade devem ser configuradas
+e verificadas no agente. Não exponha acesso remoto em produção sem essa etapa.

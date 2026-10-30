@@ -445,11 +445,15 @@ async def encerrar_meu_acesso(acesso_id: int, db: AsyncSession = Depends(get_db)
     return {"resultado": "encerrado"}
 
 
-def serializar_sessao(sessao: SessaoMeshCentral, computador_nome: str) -> dict:
+def serializar_sessao(
+    sessao: SessaoMeshCentral, computador_nome: str, chamado_id: int | None, motivo: str | None
+) -> dict:
     return {
         "id": sessao.id,
         "computador_id": sessao.computador_id,
         "computador_nome": computador_nome,
+        "chamado_id": chamado_id,
+        "motivo": motivo,
         "mesh_session_id": sessao.mesh_session_id,
         "mesh_username": sessao.mesh_username,
         "mesh_user_id": sessao.mesh_user_id,
@@ -467,14 +471,17 @@ async def sessoes_remotas_do_colaborador(
     user: UsuarioAtual = Depends(vendedor),
 ):
     registros = (await db.execute(
-        select(SessaoMeshCentral, Computador.nome)
+        select(SessaoMeshCentral, Computador.nome, Chamado.id, Chamado.descricao)
         .join(Computador, SessaoMeshCentral.computador_id == Computador.id)
+        .outerjoin(AcessoRemoto, SessaoMeshCentral.acesso_id == AcessoRemoto.id)
+        .outerjoin(Chamado, AcessoRemoto.chamado_id == Chamado.id)
         .where(Computador.dono_id == user.user_id, Computador.grupo == "empresa")
         .order_by(SessaoMeshCentral.id.desc()).limit(50)
     )).all()
     return {
         "monitor_conectado": monitor_conectado(),
-        "sessoes": [serializar_sessao(s, nome) for s, nome in registros],
+        "sessoes": [serializar_sessao(s, nome, chamado_id, motivo)
+            for s, nome, chamado_id, motivo in registros],
     }
 
 

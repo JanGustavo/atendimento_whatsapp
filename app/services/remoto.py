@@ -33,7 +33,9 @@ class RemotoMeshCentral:
     async def solicitar_acesso(self, computador: Computador) -> str:
         if not computador.mesh_node_id:
             raise HTTPException(status_code=409, detail="Cadastre o Mesh node ID deste computador")
-        return "aceito"
+        # O MeshCentral ainda nao possui controle de sessao/revogacao por esta API.
+        # Nunca transformar a existencia de um node ID em consentimento.
+        return "pendente"
 
     def link_acesso(self, computador: Computador) -> str | None:
         if not computador.mesh_node_id:

@@ -373,7 +373,7 @@ async def decidir_acesso(acesso_id: int, request: Request, db: AsyncSession = De
     resultado = "autorizado" if decisao == "autorizar" else "recusado"
     atualizacao = await db.execute(update(AcessoRemoto).where(AcessoRemoto.id == acesso_id, AcessoRemoto.resultado == "pendente", AcessoRemoto.expira_em > instante, AcessoRemoto.computador_id.in_(select(Computador.id).where(Computador.dono_id == user.user_id, Computador.grupo == "empresa"))).values(resultado=resultado, autorizado_por_id=user.user_id if decisao == "autorizar" else None, autorizado_em=instante if decisao == "autorizar" else None, fim_em=instante if decisao == "recusar" else None))
     if atualizacao.rowcount != 1:
-        await db.rollback()
+        await db.commit()  # preserva a expiracao realizada antes da tentativa invalida
         raise HTTPException(status_code=409, detail="Solicitacao expirada, encerrada ou nao autorizada")
     await db.commit()
     return {"resultado": resultado, "acesso_url": None, "detalhe": "Consentimento registrado; conexao MeshCentral permanece desabilitada"}

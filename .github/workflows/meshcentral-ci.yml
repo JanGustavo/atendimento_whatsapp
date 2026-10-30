@@ -1,8 +1,6 @@
 name: Testes MeshCentral
 
 on:
-  push:
-    branches: [feat/meshcentral-real-session-events-20261030]
   pull_request:
     paths:
       - 'app/**'
@@ -10,6 +8,10 @@ on:
       - 'migrations/**'
       - 'tests/**'
       - 'pyproject.toml'
+
+concurrency:
+  group: meshcentral-remote-pr
+  cancel-in-progress: true
 
 jobs:
   backend:

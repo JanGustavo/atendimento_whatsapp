@@ -43,3 +43,10 @@ Por padrão, a porta continua restrita a `127.0.0.1`. Para abrir o formulário a
 ## Teste no celular
 
 Na mesma rede Wi-Fi, configure `APP_BIND_HOST=0.0.0.0` no `.env` e reinicie o app. Abra `http://<IP-do-computador>:18087/painel` no celular. Isso libera a porta na rede local; o túnel Cloudflare atual publica apenas o webhook da Meta, não o painel. Para uso pela Internet, o painel precisa de uma rota HTTPS separada e controle de acesso antes da publicação.
+
+
+## Consentimento remoto (branch de desenvolvimento)
+
+Quando `REMOTO_PROVIDER=meshcentral`, a solicitação de suporte começa em `pendente` por 60 segundos. O colaborador autenticado, vinculado ao PC de grupo `empresa`, pode autorizar ou recusar na tela Meus chamados. Solicitações pendentes expiram ao consultar o painel ou tentar uma resposta; não existe tarefa de expiração em segundo plano. Depois de autorizada, a autorização permanece registrada até ser encerrada pelo colaborador ou pelo fechamento do chamado. Uma nova solicitação para o mesmo PC é bloqueada enquanto a anterior estiver pendente.
+
+**Importante:** esta etapa registra o consentimento no aplicativo, mas ainda não estabelece, libera ou revoga sessões MeshCentral. Nenhuma URL remota é entregue pela API, inclusive para solicitações autorizadas. Não confundir o estado `autorizado` com uma sessão ativa. A etapa seguinte deverá conectar a API à política de consentimento e encerramento do MeshCentral/agent antes de disponibilizar controle remoto. O atalho compartilhado de abertura de chamados não concede permissão de acesso remoto.

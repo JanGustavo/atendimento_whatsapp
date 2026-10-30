@@ -158,3 +158,68 @@ async def test_vendedor_abre_chamado_do_proprio_pc_sem_acesso_a_gestao(ambiente)
         assert (await db.get(Chamado, chamado_id)).computador_id == pc_a
     await entrar(client, "r@teste.local")
     assert chamado_id in [item["id"] for item in (await client.get("/api/chamados")).json()]
+
+async def test_consentimento_remoto_por_dono_do_pc(ambiente, monkeypatch):
+    from types import SimpleNamespace
+    from datetime import timedelta
+    from app.core.utils import now
+    from app.models import Computador
+    from app.services.remoto import RemotoMeshCentral
+
+    client, maker = ambiente
+    monkeypatch.setattr("app.api.chamados.provider_remoto_atual", lambda: RemotoMeshCentral("https://mesh.example.test"))
+    await entrar(client, "gestor@teste.local")
+    pc = (await client.post("/api/computadores", data={"nome": "PC Consentimento", "dono_id": "2", "grupo": "empresa", "mesh_node_id": "node/test"})).json()["id"]
+    async with maker() as db:
+        chamado = Chamado(computador_id=pc, descricao="Preciso de suporte", status="aberto")
+        db.add(chamado)
+        await db.commit()
+        cid = chamado.id
+    resposta = await client.post(f"/api/chamados/{cid}/acessos")
+    assert resposta.status_code == 200
+    assert resposta.json()["resultado"] == "pendente"
+    assert resposta.json()["acesso_url"] is None
+    aid = resposta.json()["id"]
+    assert (await client.post(f"/api/chamados/{cid}/acessos")).status_code == 409
+    await entrar(client, "b@teste.local")
+    assert (await client.post(f"/api/meus-acessos/{aid}/decisao", data={"decisao": "autorizar"})).status_code == 409
+    await entrar(client, "a@teste.local")
+    assert len((await client.get("/api/meus-acessos")).json()) == 1
+    aprovado = await client.post(f"/api/meus-acessos/{aid}/decisao", data={"decisao": "autorizar"})
+    assert aprovado.status_code == 200
+    assert aprovado.json()["resultado"] == "autorizado"
+    assert aprovado.json()["acesso_url"] is None
+    assert (await client.post(f"/api/meus-acessos/{aid}/decisao", data={"decisao": "recusar"})).status_code == 409
+    assert (await client.post(f"/api/meus-acessos/{aid}/encerrar")).json()["resultado"] == "encerrado"
+    async with maker() as db:
+        acesso = await db.get(AcessoRemoto, aid)
+        assert acesso.fim_em is not None and acesso.autorizado_por_id == 2
+
+
+async def test_expiracao_e_recusa_remota(ambiente, monkeypatch):
+    from datetime import timedelta
+    from app.core.utils import now
+    from app.services.remoto import RemotoMeshCentral
+    client, maker = ambiente
+    monkeypatch.setattr("app.api.chamados.provider_remoto_atual", lambda: RemotoMeshCentral("https://mesh.example.test"))
+    await entrar(client, "gestor@teste.local")
+    pc = (await client.post("/api/computadores", data={"nome": "PC Expiracao", "dono_id": "2", "grupo": "empresa", "mesh_node_id": "node/expire"})).json()["id"]
+    async with maker() as db:
+        chamado = Chamado(computador_id=pc, descricao="Problema", status="aberto")
+        db.add(chamado)
+        await db.commit()
+        cid = chamado.id
+    aid = (await client.post(f"/api/chamados/{cid}/acessos")).json()["id"]
+    async with maker() as db:
+        acesso = await db.get(AcessoRemoto, aid)
+        acesso.expira_em = now() - timedelta(minutes=1)
+        await db.commit()
+    await entrar(client, "a@teste.local")
+    assert (await client.get("/api/meus-acessos")).json() == []
+    assert (await client.post(f"/api/meus-acessos/{aid}/decisao", data={"decisao": "autorizar"})).status_code == 409
+    async with maker() as db:
+        assert (await db.get(AcessoRemoto, aid)).resultado == "expirado"
+    await entrar(client, "gestor@teste.local")
+    aid2 = (await client.post(f"/api/chamados/{cid}/acessos")).json()["id"]
+    await entrar(client, "a@teste.local")
+    assert (await client.post(f"/api/meus-acessos/{aid2}/decisao", data={"decisao": "recusar"})).json()["resultado"] == "recusado"

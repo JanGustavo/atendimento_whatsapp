@@ -47,13 +47,13 @@ def parse_horario(valor) -> datetime | None:
         if not 0 < valor < 1e15:
             return None
         try:
-            return datetime.fromtimestamp(valor / (1000 if valor > 1e11 else 1), tz=timezone.utc)
+            return datetime.fromtimestamp(valor / (1000 if valor > 1e11 else 1), tz=timezone.utc).replace(tzinfo=None)
         except (OverflowError, OSError, ValueError):
             return None
     if isinstance(valor, str):
         try:
             data = datetime.fromisoformat(valor.replace("Z", "+00:00"))
-            return data.replace(tzinfo=timezone.utc) if data.tzinfo is None else data.astimezone(timezone.utc)
+            return data if data.tzinfo is None else data.astimezone(timezone.utc).replace(tzinfo=None)
         except ValueError:
             return None
     return None
@@ -147,8 +147,8 @@ async def registrar_evento(db: AsyncSession, evento: dict) -> bool:
                 )).scalars().first()
                 if acesso is not None:
                     autorizado = acesso.autorizado_em
-                    if autorizado.tzinfo is None:
-                        autorizado = autorizado.replace(tzinfo=timezone.utc)
+                    if autorizado.tzinfo is not None:
+                        autorizado = autorizado.astimezone(timezone.utc).replace(tzinfo=None)
                     if autorizado <= momento <= autorizado + timedelta(minutes=30):
                         registro.acesso_id = acesso.id
     else:

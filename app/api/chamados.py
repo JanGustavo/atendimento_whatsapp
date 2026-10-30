@@ -13,7 +13,8 @@ from app.api.deps import UsuarioAtual, get_current_user, somente_gestor
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.utils import now as agora
-from app.models import AcessoRemoto, Chamado, Computador, Usuario
+from app.models import AcessoRemoto, Chamado, Computador, SessaoMeshCentral, Usuario
+from app.services.meshcentral_events import monitor_conectado
 from app.services.remoto import provider_remoto_atual
 
 router = APIRouter()
@@ -436,3 +437,101 @@ async def encerrar_meu_acesso(acesso_id: int, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=409, detail="Solicitacao ja finalizada ou nao autorizada")
     await db.commit()
     return {"resultado": "encerrado"}
+
+
+def serializar_sessao(sessao: SessaoMeshCentral, computador_nome: str) -> dict:
+    return {
+        "id": sessao.id,
+        "computador_id": sessao.computador_id,
+        "computador_nome": computador_nome,
+        "mesh_session_id": sessao.mesh_session_id,
+        "mesh_username": sessao.mesh_username,
+        "mesh_user_id": sessao.mesh_user_id,
+        "acesso_id": sessao.acesso_id,
+        "autorizacao_correlacionada": sessao.acesso_id is not None,
+        "estado": sessao.estado,
+        "inicio_em": sessao.inicio_em.isoformat() if sessao.inicio_em else None,
+        "fim_em": sessao.fim_em.isoformat() if sessao.fim_em else None,
+    }
+
+
+@router.get("/api/meus-sessoes-remotas")
+async def sessoes_remotas_do_colaborador(
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(vendedor),
+):
+    registros = (await db.execute(
+        select(SessaoMeshCentral, Computador.nome)
+        .join(Computador, SessaoMeshCentral.computador_id == Computador.id)
+        .where(Computador.dono_id == user.user_id, Computador.grupo == "empresa")
+        .order_by(SessaoMeshCentral.id.desc()).limit(50)
+    )).all()
+    return {
+        "monitor_conectado": monitor_conectado(),
+        "sessoes": [serializar_sessao(s, nome) for s, nome in registros],
+    }
+
+
+@router.get("/api/chamados/sessoes-remotas")
+async def auditar_sessoes_remotas(
+    db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(suporte),
+):
+    registros = (await db.execute(
+        select(SessaoMeshCentral, Computador.nome)
+        .join(Computador, SessaoMeshCentral.computador_id == Computador.id)
+        .order_by(SessaoMeshCentral.id.desc()).limit(200)
+    )).all()
+    return {
+        "monitor_conectado": monitor_conectado(),
+        "sessoes": [serializar_sessao(s, nome) for s, nome in registros],
+    }
+
+
+@router.post("/api/computadores/{computador_id}/mesh-node")
+async def vincular_no_meshcentral(
+    computador_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(somente_gestor),
+):
+    dados = await form(request)
+    nodeid = dados.get("mesh_node_id", "").strip()
+    if (not nodeid.startswith("node/") or len(nodeid.split("/")) != 3
+            or any(not parte for parte in nodeid.split("/")) or len(nodeid) > 255):
+        raise HTTPException(status_code=422, detail="Informe o ID completo node/<dominio>/<identificador>")
+    pc = await db.get(Computador, computador_id)
+    if pc is None:
+        raise HTTPException(status_code=404, detail="Computador nao encontrado")
+    outro = (await db.execute(select(Computador.id).where(
+        Computador.mesh_node_id == nodeid, Computador.id != computador_id
+    ))).first()
+    if outro:
+        raise HTTPException(status_code=409, detail="No MeshCentral vinculado a outro computador")
+    pc.mesh_node_id = nodeid
+    await db.commit()
+    return {"computador_id": pc.id, "mesh_node_id": nodeid}
+
+
+@router.post("/api/gestor/usuarios/{usuario_id}/meshcentral")
+async def vincular_operador_meshcentral(
+    usuario_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(somente_gestor),
+):
+    dados = await form(request)
+    mesh_id = dados.get("mesh_user_id", "").strip()
+    if (not mesh_id.startswith("user/") or len(mesh_id.split("/")) != 3
+            or any(not parte for parte in mesh_id.split("/")[2:]) or len(mesh_id) > 255):
+        raise HTTPException(status_code=422, detail="Informe o MeshCentral user/<dominio>/<login>")
+    usuario = await db.get(Usuario, usuario_id)
+    if usuario is None or usuario.role not in {"gestor", "supervisor"}:
+        raise HTTPException(status_code=404, detail="Tecnico nao encontrado")
+    outro = (await db.execute(select(Usuario.id).where(
+        Usuario.mesh_user_id == mesh_id, Usuario.id != usuario_id
+    ))).first()
+    if outro:
+        raise HTTPException(status_code=409, detail="Identidade MeshCentral ja vinculada")
+    usuario.mesh_user_id = mesh_id
+    await db.commit()
+    return {"usuario_id": usuario.id, "mesh_user_id": mesh_id}

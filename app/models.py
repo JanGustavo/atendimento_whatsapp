@@ -29,6 +29,7 @@ class Usuario(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     online: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     ultima_atividade_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    mesh_user_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     foto_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
     ultima_atribuicao_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     setor_interno_id: Mapped[int | None] = mapped_column(Integer)
@@ -198,3 +199,25 @@ class AcessoRemoto(Base):
     encerrado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
     solicitante: Mapped[Usuario] = relationship(foreign_keys=[solicitante_id])
     computador: Mapped[Computador] = relationship()
+
+
+class SessaoMeshCentral(Base):
+    """Sessao real observada no relay MeshCentral (nao uma autorizacao)."""
+
+    __tablename__ = "sessoes_meshcentral"
+    __table_args__ = (
+        Index("uq_mesh_sessao_node", "mesh_node_id", "mesh_session_id", unique=True),
+        CheckConstraint("estado IN ('ativa','encerrada','desconhecida')"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mesh_session_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    mesh_node_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    mesh_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    mesh_username: Mapped[str] = mapped_column(String(120), nullable=False)
+    computador_id: Mapped[int] = mapped_column(ForeignKey("computadores.id"), index=True)
+    acesso_id: Mapped[int | None] = mapped_column(ForeignKey("acessos_remotos.id"), index=True)
+    estado: Mapped[str] = mapped_column(String(20), nullable=False)
+    inicio_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fim_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    observado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)

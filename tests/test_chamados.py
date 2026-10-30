@@ -165,7 +165,7 @@ async def test_consentimento_remoto_por_dono_do_pc(ambiente, monkeypatch):
     client, maker = ambiente
     monkeypatch.setattr("app.api.chamados.provider_remoto_atual", lambda: RemotoMeshCentral("https://mesh.example.test"))
     await entrar(client, "gestor@teste.local")
-    pc = (await client.post("/api/computadores", data={"nome": "PC Consentimento", "dono_id": "2", "grupo": "empresa", "mesh_node_id": "node/test"})).json()["id"]
+    pc = (await client.post("/api/computadores", data={"nome": "PC Consentimento", "dono_id": "2", "grupo": "empresa", "mesh_node_id": "node//test"})).json()["id"]
     async with maker() as db:
         chamado = Chamado(computador_id=pc, descricao="Preciso de suporte", status="aberto")
         db.add(chamado)
@@ -208,7 +208,7 @@ async def test_expiracao_e_recusa_remota(ambiente, monkeypatch):
     client, maker = ambiente
     monkeypatch.setattr("app.api.chamados.provider_remoto_atual", lambda: RemotoMeshCentral("https://mesh.example.test"))
     await entrar(client, "gestor@teste.local")
-    pc = (await client.post("/api/computadores", data={"nome": "PC Expiracao", "dono_id": "2", "grupo": "empresa", "mesh_node_id": "node/expire"})).json()["id"]
+    pc = (await client.post("/api/computadores", data={"nome": "PC Expiracao", "dono_id": "2", "grupo": "empresa", "mesh_node_id": "node//expire"})).json()["id"]
     async with maker() as db:
         chamado = Chamado(computador_id=pc, descricao="Problema", status="aberto")
         db.add(chamado)

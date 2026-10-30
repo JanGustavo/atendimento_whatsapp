@@ -4093,3 +4093,19 @@ td small {
 .remote-consent-actions { display: flex; gap: 12px; margin-top: 20px; }
 .remote-consent-actions .button { flex: 1; min-height: 44px; }
 @media (max-width: 460px) { .remote-consent-actions { flex-direction: column; } }
+
+
+/* Sessões remotas ativas observadas pelo relay do MeshCentral. */
+.remote-session-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 2px solid #d49d30;
+  border-radius: 12px;
+  background: #31230b;
+  color: #fff;
+  padding: 15px 18px;
+  font-size: 14px;
+}
+.remote-session-banner strong { font-size: 16px; }
+.remote-session-banner span { overflow-wrap: anywhere; }

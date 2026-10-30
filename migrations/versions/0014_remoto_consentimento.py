@@ -19,7 +19,7 @@ def upgrade():
     # batch_alter_table recria a tabela no SQLite para atualizar CHECK.
     with op.batch_alter_table("acessos_remotos", recreate="always") as batch:
         batch.add_column(sa.Column("expira_em", sa.DateTime(timezone=True)))
-        batch.add_column(sa.Column("autorizado_por_id", sa.Integer(), sa.ForeignKey("usuarios.id")))
+        batch.add_column(sa.Column("autorizado_por_id", sa.Integer(), sa.ForeignKey("usuarios.id", name="fk_acessos_remotos_autorizado_por_id")))
         batch.add_column(sa.Column("autorizado_em", sa.DateTime(timezone=True)))
     with op.batch_alter_table("acessos_remotos", recreate="always") as batch:
         batch.create_check_constraint("ck_acessos_remotos_resultado_novo", RESULTADOS)

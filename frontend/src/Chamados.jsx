@@ -104,6 +104,7 @@ function NovoChamado({ computadores, busy, onCreate }) {
 
 export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
   const [acessos, setAcessos] = useState([])
+  const [sessoesRemotas, setSessoesRemotas] = useState({ monitor_conectado: false, sessoes: [] })
   const [erroAcesso, setErroAcesso] = useState('')
   const botaoAutorizar = useRef(null)
   const pendente = acessos.find(acesso => acesso.resultado === 'pendente')
@@ -128,7 +129,14 @@ export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
   useEffect(() => {
     let ativo = true
     async function carregar() {
-      try { const r = await fetch('/api/meus-acessos'); if (r.ok && ativo) setAcessos(await r.json()) } catch { /* rede indisponivel */ }
+      try {
+        const [acessosResposta, sessoesResposta] = await Promise.all([
+          fetch('/api/meus-acessos'),
+          fetch('/api/meus-sessoes-remotas'),
+        ])
+        if (ativo && acessosResposta.ok) setAcessos(await acessosResposta.json())
+        if (ativo && sessoesResposta.ok) setSessoesRemotas(await sessoesResposta.json())
+      } catch { /* rede indisponivel, nao presumir que a sessao foi encerrada */ }
     }
     carregar()
     const intervalo = setInterval(carregar, 3000)
@@ -154,6 +162,14 @@ export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
     descricaoLista="Você acompanha aqui os chamados do seu computador."
     lateral={<NovoChamado computadores={computadores} busy={busy} onCreate={onCreate} />}
   >
+    {sessoesRemotas.sessoes.filter(s => s.estado === 'ativa').map(s => (
+      <div className="remote-session-banner" role="alert" key={s.id}>
+        <strong>Possível sessão remota em andamento por {s.mesh_username}</strong>
+        <span>{s.computador_nome} · {s.autorizacao_correlacionada ? 'Autorização vinculada' : 'Sem autorização vinculada ao chamado'}</span>
+        {!sessoesRemotas.monitor_conectado && <span>Monitor de eventos desconectado: o estado exibido pode estar desatualizado.</span>}
+        <span>Para interromper a conexão, use a barra de privacidade do MeshCentral no próprio computador.</span>
+      </div>
+    ))}
     {erroAcesso && <p role="alert">{erroAcesso}</p>}
     {pendente && <div className="remote-consent-overlay">
       <section role="alertdialog" aria-modal="true" aria-labelledby="remote-consent-title" aria-describedby="remote-consent-description" className="remote-consent-dialog" onKeyDown={reterFoco}>
@@ -247,6 +263,19 @@ function CadastroComputador({ usuarios, busy, onCreateComputer }) {
 }
 
 export default function Chamados({ me, chamados, computadores, usuarios, busy, onRequest, onClose, onCreateComputer }) {
+  const [sessoesRemotas, setSessoesRemotas] = useState({ monitor_conectado: false, sessoes: [] })
+  useEffect(() => {
+    let ativo = true
+    async function atualizar() {
+      try {
+        const resposta = await fetch('/api/chamados/sessoes-remotas')
+        if (ativo && resposta.ok) setSessoesRemotas(await resposta.json())
+      } catch { /* historico permanece visivel */ }
+    }
+    atualizar()
+    const intervalo = setInterval(atualizar, 3000)
+    return () => { ativo = false; clearInterval(intervalo) }
+  }, [])
   const abertos = chamados.filter(chamado => chamado.status !== 'fechado').length
   return <EstruturaChamados
     titulo="Chamados dos computadores"
@@ -259,6 +288,17 @@ export default function Chamados({ me, chamados, computadores, usuarios, busy, o
       {me.role === 'gestor' && <CadastroComputador usuarios={usuarios} busy={busy} onCreateComputer={onCreateComputer} />}
     </>}
   >
+    {sessoesRemotas.sessoes.length > 0 && <section className="surface tickets-side-card" aria-label="Auditoria de sessões MeshCentral">
+      <h2>Sessões de desktop observadas no MeshCentral</h2>
+      <p className="muted">{sessoesRemotas.monitor_conectado ? 'Monitor conectado' : 'Monitor desconectado: sessões podem estar desatualizadas'}</p>
+      <ul className="ticket-history">
+        {sessoesRemotas.sessoes.slice(0, 30).map(s => <li key={s.id}>
+          <strong>{s.computador_nome}</strong> · {s.mesh_username} · {s.estado}
+          <span> · {s.inicio_em ? dataHora(s.inicio_em) : 'Início não observado'} / {s.fim_em ? dataHora(s.fim_em) : 'Fim não observado'}</span>
+          <span> · {s.autorizacao_correlacionada ? 'Vinculada a consentimento' : 'Sem vínculo com autorização'}</span>
+        </li>)}
+      </ul>
+    </section>}
     {chamados.map(chamado => <CartaoChamado key={chamado.id} chamado={chamado} visaoEquipe>
       {chamado.status !== 'fechado' && <AcoesChamado chamado={chamado} busy={busy} onRequest={onRequest} onClose={onClose} />}
     </CartaoChamado>)}

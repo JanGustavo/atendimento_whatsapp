@@ -20,6 +20,7 @@ from app.core.config import get_settings
 from app.core.database import async_session_maker
 from app.providers import provider_atual
 from app.services.atendimento import verificar_timers
+from app.services.meshcentral_events import acompanhar_meshcentral
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,15 @@ async def timer_loop() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     tarefa = asyncio.create_task(timer_loop())
+    monitor = asyncio.create_task(acompanhar_meshcentral())
     try:
         yield
     finally:
-        tarefa.cancel()
-        with suppress(asyncio.CancelledError):
-            await tarefa
+        for task in (tarefa, monitor):
+            task.cancel()
+        for task in (tarefa, monitor):
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 app = FastAPI(title="Atendimento WhatsApp — Alpha", lifespan=lifespan)

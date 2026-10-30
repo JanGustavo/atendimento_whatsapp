@@ -54,11 +54,11 @@ async def test_meshcentral_exige_node_id_e_preserva_regra_do_pc_do_dono(ambiente
     assert (await client.post(f"/api/chamados/{chamados_ids[1]}/acessos")).status_code == 409
     resposta = await client.post(f"/api/chamados/{chamados_ids[0]}/acessos")
     assert resposta.status_code == 200
-    assert resposta.json()["resultado"] == "aceito"
-    assert "node%2F%2Fabc" in resposta.json()["acesso_url"]
+    assert resposta.json()["resultado"] == "pendente"
+    assert resposta.json()["acesso_url"] is None
     lista = (await client.get("/api/chamados")).json()
-    assert next(item for item in lista if item["id"] == chamados_ids[0])["acessos"][0]["acesso_url"]
+    assert next(item for item in lista if item["id"] == chamados_ids[0])["acessos"][0]["acesso_url"] is None
     async with maker() as db:
         acessos = (await db.execute(select(AcessoRemoto))).scalars().all()
         assert len(acessos) == 1
-        assert acessos[0].resultado == "aceito" and acessos[0].fim_em is None
+        assert acessos[0].resultado == "pendente" and acessos[0].fim_em is None

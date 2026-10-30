@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const NOMES_STATUS = { aberto: 'Aberto', em_atendimento: 'Em atendimento', fechado: 'Fechado' }
 const NOVO_COMPUTADOR_VAZIO = { nome: '', dono_id: '', grupo: 'empresa', mesh_node_id: '' }
@@ -105,6 +105,26 @@ function NovoChamado({ computadores, busy, onCreate }) {
 export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
   const [acessos, setAcessos] = useState([])
   const [erroAcesso, setErroAcesso] = useState('')
+  const botaoAutorizar = useRef(null)
+  const pendente = acessos.find(acesso => acesso.resultado === 'pendente')
+  useEffect(() => {
+    if (pendente) botaoAutorizar.current?.focus()
+  }, [pendente?.id])
+
+  function reterFoco(event) {
+    if (event.key !== 'Tab') return
+    const botoes = event.currentTarget.querySelectorAll('button:not([disabled])')
+    const primeiro = botoes[0]
+    const ultimo = botoes[botoes.length - 1]
+    if (event.shiftKey && document.activeElement === primeiro) {
+      event.preventDefault()
+      ultimo?.focus()
+    } else if (!event.shiftKey && document.activeElement === ultimo) {
+      event.preventDefault()
+      primeiro?.focus()
+    }
+  }
+
   useEffect(() => {
     let ativo = true
     async function carregar() {
@@ -135,10 +155,27 @@ export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
     lateral={<NovoChamado computadores={computadores} busy={busy} onCreate={onCreate} />}
   >
     {erroAcesso && <p role="alert">{erroAcesso}</p>}
+    {pendente && <div className="remote-consent-overlay">
+      <section role="alertdialog" aria-modal="true" aria-labelledby="remote-consent-title" aria-describedby="remote-consent-description" className="remote-consent-dialog" onKeyDown={reterFoco}>
+        <div className="eyebrow">SOLICITAÇÃO DE ACESSO REMOTO</div>
+        <h2 id="remote-consent-title">O supervisor {pendente.solicitante} solicita acesso ao seu computador.</h2>
+        <p id="remote-consent-description">Confirme apenas se reconhecer o técnico e o motivo. Sem resposta, a solicitação expira automaticamente.</p>
+        <dl className="remote-consent-details">
+          <div><dt>Computador</dt><dd>{pendente.computador_nome}</dd></div>
+          <div><dt>Chamado</dt><dd>#{pendente.chamado_id}</dd></div>
+          <div><dt>Motivo</dt><dd>{pendente.motivo}</dd></div>
+        </dl>
+        <p className="muted">Esta confirmação funciona somente enquanto o painel estiver aberto. Ela não inicia uma sessão remota.</p>
+        <div className="remote-consent-actions">
+          <button ref={botaoAutorizar} className="button button-primary" onClick={() => decidir(pendente.id, 'autorizar')}>Aceitar</button>
+          <button className="button button-soft" onClick={() => decidir(pendente.id, 'recusar')}>Recusar</button>
+        </div>
+      </section>
+    </div>}
     {acessos.map(acesso => <section className="surface tickets-side-card" key={acesso.id}>
       <strong>Solicitação de acesso remoto: {acesso.solicitante}</strong>
-      <p>{acesso.resultado === "pendente" ? "Autorize somente se reconhecer o técnico. A solicitação expira automaticamente." : "Autorização registrada. Conexão remota ainda não está habilitada."}</p>
-      {acesso.resultado === "pendente" && <><button className="button button-primary" onClick={() => decidir(acesso.id, "autorizar")}>Autorizar</button> <button className="button button-soft" onClick={() => decidir(acesso.id, "recusar")}>Recusar</button></>}
+      <p>{acesso.computador_nome} · Chamado #{acesso.chamado_id}</p>
+      <p>{acesso.resultado === 'pendente' ? 'Aguardando sua resposta. Nenhum acesso foi iniciado.' : 'Autorização registrada, mas nenhuma sessão remota foi iniciada.'}</p>
       {acesso.resultado === "autorizado" && <button className="button button-soft" onClick={() => encerrar(acesso.id)}>Encerrar autorização</button>}
     </section>)}
     {chamados.map(chamado => <CartaoChamado key={chamado.id} chamado={chamado} />)}

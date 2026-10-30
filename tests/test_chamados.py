@@ -160,10 +160,6 @@ async def test_vendedor_abre_chamado_do_proprio_pc_sem_acesso_a_gestao(ambiente)
     assert chamado_id in [item["id"] for item in (await client.get("/api/chamados")).json()]
 
 async def test_consentimento_remoto_por_dono_do_pc(ambiente, monkeypatch):
-    from types import SimpleNamespace
-    from datetime import timedelta
-    from app.core.utils import now
-    from app.models import Computador
     from app.services.remoto import RemotoMeshCentral
 
     client, maker = ambiente
@@ -185,6 +181,13 @@ async def test_consentimento_remoto_por_dono_do_pc(ambiente, monkeypatch):
     assert (await client.post(f"/api/meus-acessos/{aid}/decisao", data={"decisao": "autorizar"})).status_code == 409
     await entrar(client, "a@teste.local")
     assert len((await client.get("/api/meus-acessos")).json()) == 1
+    aviso = (await client.get("/api/meus-acessos")).json()[0]
+    assert aviso["solicitante"] == "Gestor"
+    assert aviso["computador_nome"] == "PC Consentimento"
+    assert aviso["chamado_id"] == cid
+    assert aviso["motivo"] == "Preciso de suporte"
+    assert aviso["sessao_remota_ativa"] is False
+    assert aviso["acesso_url"] is None
     aprovado = await client.post(f"/api/meus-acessos/{aid}/decisao", data={"decisao": "autorizar"})
     assert aprovado.status_code == 200
     assert aprovado.json()["resultado"] == "autorizado"
@@ -194,6 +197,8 @@ async def test_consentimento_remoto_por_dono_do_pc(ambiente, monkeypatch):
     async with maker() as db:
         acesso = await db.get(AcessoRemoto, aid)
         assert acesso.fim_em is not None and acesso.autorizado_por_id == 2
+        assert acesso.respondido_por_id == 2 and acesso.respondido_em is not None
+        assert acesso.encerrado_por_id == 2
 
 
 async def test_expiracao_e_recusa_remota(ambiente, monkeypatch):
@@ -223,3 +228,7 @@ async def test_expiracao_e_recusa_remota(ambiente, monkeypatch):
     aid2 = (await client.post(f"/api/chamados/{cid}/acessos")).json()["id"]
     await entrar(client, "a@teste.local")
     assert (await client.post(f"/api/meus-acessos/{aid2}/decisao", data={"decisao": "recusar"})).json()["resultado"] == "recusado"
+    async with maker() as db:
+        acesso = await db.get(AcessoRemoto, aid2)
+        assert acesso.respondido_por_id == 2 and acesso.respondido_em is not None
+        assert acesso.autorizado_em is None and acesso.fim_em is not None

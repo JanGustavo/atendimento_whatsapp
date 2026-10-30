@@ -18,13 +18,9 @@ ANTIGOS = "resultado IN ('aceito','recusado','cancelado','simulado')"
 def upgrade():
     # batch_alter_table recria a tabela no SQLite para atualizar CHECK.
     with op.batch_alter_table("acessos_remotos", recreate="always") as batch:
-        batch.drop_constraint("ck_acessos_remotos_resultado", type_="check") if False else None
         batch.add_column(sa.Column("expira_em", sa.DateTime(timezone=True)))
         batch.add_column(sa.Column("autorizado_por_id", sa.Integer(), sa.ForeignKey("usuarios.id")))
         batch.add_column(sa.Column("autorizado_em", sa.DateTime(timezone=True)))
-    # Um CHECK anonimo antigo pode permanecer na copia do SQLite; recriar com
-    # constraint nomeada via operacoes SQLite diretas exigiria manutencao manual.
-    # A migracao de estados e feita abaixo com batch recriando tabela.
     with op.batch_alter_table("acessos_remotos", recreate="always") as batch:
         batch.create_check_constraint("ck_acessos_remotos_resultado_novo", RESULTADOS)
 

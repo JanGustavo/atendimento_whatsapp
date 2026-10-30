@@ -490,13 +490,16 @@ async def auditar_sessoes_remotas(
     db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(suporte),
 ):
     registros = (await db.execute(
-        select(SessaoMeshCentral, Computador.nome)
+        select(SessaoMeshCentral, Computador.nome, Chamado.id, Chamado.descricao)
         .join(Computador, SessaoMeshCentral.computador_id == Computador.id)
+        .outerjoin(AcessoRemoto, SessaoMeshCentral.acesso_id == AcessoRemoto.id)
+        .outerjoin(Chamado, AcessoRemoto.chamado_id == Chamado.id)
         .order_by(SessaoMeshCentral.id.desc()).limit(200)
     )).all()
     return {
         "monitor_conectado": monitor_conectado(),
-        "sessoes": [serializar_sessao(s, nome) for s, nome in registros],
+        "sessoes": [serializar_sessao(s, nome, chamado_id, motivo)
+            for s, nome, chamado_id, motivo in registros],
     }
 
 

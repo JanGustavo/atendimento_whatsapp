@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const NOMES_STATUS = { aberto: 'Aberto', em_atendimento: 'Em atendimento', fechado: 'Fechado' }
 const NOVO_COMPUTADOR_VAZIO = { nome: '', dono_id: '', grupo: 'empresa', mesh_node_id: '' }
@@ -103,6 +103,30 @@ function NovoChamado({ computadores, busy, onCreate }) {
 }
 
 export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
+  const [acessos, setAcessos] = useState([])
+  const [erroAcesso, setErroAcesso] = useState('')
+  useEffect(() => {
+    let ativo = true
+    async function carregar() {
+      try { const r = await fetch('/api/meus-acessos'); if (r.ok && ativo) setAcessos(await r.json()) } catch { /* rede indisponivel */ }
+    }
+    carregar()
+    const intervalo = setInterval(carregar, 3000)
+    return () => { ativo = false; clearInterval(intervalo) }
+  }, [])
+  async function decidir(id, acao) {
+    const corpo = new URLSearchParams({ decisao: acao })
+    const resposta = await fetch(`/api/meus-acessos/${id}/decisao`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: corpo })
+    if (!resposta.ok) { setErroAcesso((await resposta.json()).detail || 'Nao foi possivel responder'); return }
+    setErroAcesso('')
+    setAcessos(lista => lista.filter(a => a.id !== id))
+  }
+  async function encerrar(id) {
+    const resposta = await fetch(`/api/meus-acessos/${id}/encerrar`, { method: 'POST' })
+    if (!resposta.ok) { setErroAcesso('Nao foi possivel encerrar'); return }
+    setErroAcesso('')
+    setAcessos(lista => lista.filter(a => a.id !== id))
+  }
   return <EstruturaChamados
     titulo="Meus chamados"
     descricao="Conte o que aconteceu no seu computador para a equipe de suporte."
@@ -110,6 +134,13 @@ export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
     descricaoLista="Você acompanha aqui os chamados do seu computador."
     lateral={<NovoChamado computadores={computadores} busy={busy} onCreate={onCreate} />}
   >
+    {erroAcesso && <p role="alert">{erroAcesso}</p>}
+    {acessos.map(acesso => <section className="surface tickets-side-card" key={acesso.id}>
+      <strong>Solicitação de acesso remoto: {acesso.solicitante}</strong>
+      <p>{acesso.resultado === "pendente" ? "Autorize somente se reconhecer o técnico. A solicitação expira automaticamente." : "Autorização registrada. Conexão remota ainda não está habilitada."}</p>
+      {acesso.resultado === "pendente" && <><button className="button button-primary" onClick={() => decidir(acesso.id, "autorizar")}>Autorizar</button> <button className="button button-soft" onClick={() => decidir(acesso.id, "recusar")}>Recusar</button></>}
+      {acesso.resultado === "autorizado" && <button className="button button-soft" onClick={() => encerrar(acesso.id)}>Encerrar autorização</button>}
+    </section>)}
     {chamados.map(chamado => <CartaoChamado key={chamado.id} chamado={chamado} />)}
     {!chamados.length && <div className="surface tickets-empty chamados-vazio">Nenhum chamado registrado ainda.</div>}
   </EstruturaChamados>
@@ -120,7 +151,7 @@ export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
 function AcoesChamado({ chamado, busy, onRequest, onClose }) {
   const [solucao, setSolucao] = useState('')
   const semAcessoRemoto = chamado.grupo === 'dono'
-  const acessoPreparado = chamado.acessos.some(acesso => acesso.acesso_url)
+  const acessoPreparado = chamado.acessos.some(acesso => ['pendente', 'autorizado'].includes(acesso.resultado) && !acesso.fim_em)
 
   async function fechar(event) {
     event.preventDefault()
@@ -128,7 +159,7 @@ function AcoesChamado({ chamado, busy, onRequest, onClose }) {
   }
 
   return <div className="ticket-actions chamados-acoes">
-    <button className="button button-primary" disabled={busy || semAcessoRemoto || acessoPreparado} title={semAcessoRemoto ? 'O PC do dono não permite solicitação remota' : ''} onClick={() => onRequest(chamado.id)}>{acessoPreparado ? 'Acesso preparado' : 'Solicitar acesso'}</button>
+    <button className="button button-primary" disabled={busy || semAcessoRemoto || acessoPreparado} title={semAcessoRemoto ? 'O PC do dono não permite solicitação remota' : ''} onClick={() => onRequest(chamado.id)}>{acessoPreparado ? 'Solicitação ativa' : 'Solicitar acesso'}</button>
     {semAcessoRemoto && <small>Sem acesso remoto ao PC do dono.</small>}
     <form onSubmit={fechar}>
       <input value={solucao} onChange={event => setSolucao(event.target.value)} placeholder="Descreva o que foi resolvido" aria-label="Descreva o que foi resolvido" minLength="3" maxLength="4000" required />

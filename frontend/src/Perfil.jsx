@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ModalImagem from './ModalImagem.jsx'
+import { fetchApi } from './api.js'
 
 const FOTO_TIPOS_ACEITOS = ['image/png', 'image/jpeg', 'image/webp']
 const FOTO_TAMANHO_MAX_MB = 2
@@ -129,7 +130,7 @@ export default function Perfil({ me, onEnviarFoto, onVisualizarFoto }) {
     }
     setBusy(true)
     try {
-      const resposta = await fetch('/api/auth/senha', {
+      const resposta = await fetchApi('/api/auth/senha', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },

@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { messageDay, messageHour } from './dates.js'
 import { converterWebp } from './images.js'
 import ModalImagem from './ModalImagem.jsx'
+import { fetchApi } from './api.js'
 
 const BASE = '/api/interno'
 const PAGINA = 50
@@ -14,27 +15,27 @@ const PAPEL_PAREDE_TAMANHO_MAX_MB = 2
 /* ───────────── API ───────────── */
 
 async function leitura(url, signal) {
-  const resposta = await fetch(url, { credentials: 'same-origin', signal })
+  const resposta = await fetchApi(url, { credentials: 'same-origin', signal })
   if (!resposta.ok) throw new Error('Não foi possível carregar o chat interno.')
   return resposta.json()
 }
 
 async function postar(url, init, mensagemPadrao) {
-  const resposta = await fetch(url, { method: 'POST', credentials: 'same-origin', ...init })
+  const resposta = await fetchApi(url, { method: 'POST', credentials: 'same-origin', ...init })
   if (resposta.ok) return
   const corpo = await resposta.json().catch(() => ({}))
   throw new Error(typeof corpo.detail === 'string' ? corpo.detail : mensagemPadrao)
 }
 
 async function apagar(url) {
-  const resposta = await fetch(url, { method: 'DELETE', credentials: 'same-origin' })
+  const resposta = await fetchApi(url, { method: 'DELETE', credentials: 'same-origin' })
   if (resposta.ok) return
   const corpo = await resposta.json().catch(() => ({}))
   throw new Error(typeof corpo.detail === 'string' ? corpo.detail : 'Não foi possível apagar a mensagem.')
 }
 
 async function editar(url, texto) {
-  const resposta = await fetch(url, {
+  const resposta = await fetchApi(url, {
     method: 'PATCH', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
     body: new URLSearchParams({ texto }),

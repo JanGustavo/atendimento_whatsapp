@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { fetchApi } from './api.js'
 
 const token = new URLSearchParams(window.location.search).get('token') || ''
 
@@ -11,7 +12,7 @@ export default function ChamadoPublico() {
   const [enviando, setEnviando] = useState(false)
 
   useEffect(() => {
-    fetch(`/api/chamado/computadores?token=${encodeURIComponent(token)}`, { cache: 'no-store' })
+    fetchApi(`/api/chamado/computadores?token=${encodeURIComponent(token)}`, { cache: 'no-store' })
       .then(async (resposta) => {
         if (!resposta.ok)
           throw new Error(
@@ -38,7 +39,7 @@ export default function ChamadoPublico() {
       descricao: descricao.trim(),
     })
     try {
-      const resposta = await fetch('/api/chamado', {
+      const resposta = await fetchApi('/api/chamado', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: dados,

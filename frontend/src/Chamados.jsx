@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { fetchApi } from './api.js'
 
 const NOMES_STATUS = { aberto: 'Aberto', em_atendimento: 'Em atendimento', fechado: 'Fechado' }
 const NOVO_COMPUTADOR_VAZIO = { nome: '', dono_id: '', grupo: 'empresa', mesh_node_id: '' }
@@ -131,8 +132,8 @@ export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
     async function carregar() {
       try {
         const [acessosResposta, sessoesResposta] = await Promise.all([
-          fetch('/api/meus-acessos'),
-          fetch('/api/meus-sessoes-remotas'),
+          fetchApi('/api/meus-acessos'),
+          fetchApi('/api/meus-sessoes-remotas'),
         ])
         if (ativo && acessosResposta.ok) setAcessos(await acessosResposta.json())
         if (ativo && sessoesResposta.ok) setSessoesRemotas(await sessoesResposta.json())
@@ -144,13 +145,13 @@ export function ChamadosVendedor({ chamados, computadores, busy, onCreate }) {
   }, [])
   async function decidir(id, acao) {
     const corpo = new URLSearchParams({ decisao: acao })
-    const resposta = await fetch(`/api/meus-acessos/${id}/decisao`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: corpo })
+    const resposta = await fetchApi(`/api/meus-acessos/${id}/decisao`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: corpo })
     if (!resposta.ok) { setErroAcesso((await resposta.json()).detail || 'Nao foi possivel responder'); return }
     setErroAcesso('')
     setAcessos(lista => lista.filter(a => a.id !== id))
   }
   async function encerrar(id) {
-    const resposta = await fetch(`/api/meus-acessos/${id}/encerrar`, { method: 'POST' })
+    const resposta = await fetchApi(`/api/meus-acessos/${id}/encerrar`, { method: 'POST' })
     if (!resposta.ok) { setErroAcesso('Nao foi possivel encerrar'); return }
     setErroAcesso('')
     setAcessos(lista => lista.filter(a => a.id !== id))
@@ -268,7 +269,7 @@ export default function Chamados({ me, chamados, computadores, usuarios, busy, o
     let ativo = true
     async function atualizar() {
       try {
-        const resposta = await fetch('/api/chamados/sessoes-remotas')
+        const resposta = await fetchApi('/api/chamados/sessoes-remotas')
         if (ativo && resposta.ok) setSessoesRemotas(await resposta.json())
       } catch { /* historico permanece visivel */ }
     }

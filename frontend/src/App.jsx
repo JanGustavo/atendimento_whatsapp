@@ -5,6 +5,7 @@ import Interno, { Icone, PapelParede, lerPapelParede } from './Interno.jsx'
 import Perfil from './Perfil.jsx'
 import ModalImagem from './ModalImagem.jsx'
 import { converterWebp } from './images.js'
+import { fetchApi, getJSON, postForm } from './api.js'
 
 const roleName = { gestor: 'Gestor', supervisor: 'Supervisor', colaborador: 'Colaborador' }
 const stageName = {
@@ -55,43 +56,6 @@ function initialPage(role) {
     : role === 'gestor'
       ? 'manager'
       : 'inbox'
-}
-
-async function getJSON(path) {
-  const response = await fetch(path, { credentials: 'same-origin' })
-  if (!response.ok) {
-    const error = new Error(
-      response.status === 401
-        ? 'Sessão encerrada. Entre novamente.'
-        : `Falha ao carregar (${response.status}).`,
-    )
-    error.status = response.status
-    throw error
-  }
-  return response.json()
-}
-
-async function postForm(path, values) {
-  const body = new URLSearchParams()
-  Object.entries(values).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) body.set(key, String(value))
-  })
-  const response = await fetch(path, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-    body,
-  })
-  if (!response.ok) {
-    let message = `Não foi possível concluir (${response.status}).`
-    try {
-      const data = await response.json()
-      if (data.detail) message = typeof data.detail === 'string' ? data.detail : message
-    } catch {
-      /* Erros de rede sem corpo JSON. */
-    }
-    throw new Error(message)
-  }
 }
 
 function time(value) {
@@ -1519,7 +1483,7 @@ export default function App() {
     const batida = async () => {
       if (document.visibilityState !== 'visible') return
       try {
-        await fetch('/api/presenca', { method: 'POST', credentials: 'same-origin' })
+        await fetchApi('/api/presenca', { method: 'POST', credentials: 'same-origin' })
       } catch { /* A próxima consulta tenta novamente. */ }
     }
     batida()
@@ -1751,7 +1715,7 @@ export default function App() {
     if (page !== 'inbox' || !selectedId || detail?.conversa?.id !== selectedId) return
     const confirmar = () => {
       if (document.visibilityState !== 'visible') return
-      fetch(`/api/atendimentos/${selectedId}/leitura`, {
+      fetchApi(`/api/atendimentos/${selectedId}/leitura`, {
         method: 'POST',
         credentials: 'same-origin',
       })
@@ -1863,7 +1827,7 @@ export default function App() {
     setError('')
     setNotice('')
     try {
-      const response = await fetch(path, {
+      const response = await fetchApi(path, {
         credentials: 'same-origin',
         ...options,
       })
@@ -2116,7 +2080,7 @@ export default function App() {
               setBusy(true); setError('')
               try {
                 const body = new URLSearchParams({ nome, numero, optin: optin ? 'sim' : 'nao' })
-                const resposta = await fetch('/api/atendimentos/novo-contato', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }, body })
+                const resposta = await fetchApi('/api/atendimentos/novo-contato', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }, body })
                 const dados = await resposta.json()
                 if (!resposta.ok) throw new Error(dados.detail || 'Não foi possível iniciar o contato.')
                 await refreshConversations()
@@ -2156,7 +2120,7 @@ export default function App() {
               setError('')
               try {
                 const webp = await converterWebp(arquivo, 512)
-                const resposta = await fetch(`/api/atendimentos/${id}/foto`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'image/webp' }, body: webp })
+                const resposta = await fetchApi(`/api/atendimentos/${id}/foto`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'image/webp' }, body: webp })
                 if (!resposta.ok) throw new Error('Não foi possível salvar a foto do contato.')
                 await Promise.all([refreshConversations(), refreshDetail()])
                 setNotice('Foto do contato salva pela equipe.')
@@ -2285,7 +2249,7 @@ export default function App() {
             onVisualizarFoto={(url, titulo) => setImagemModal({ url, titulo })}
             onEnviarFoto={async (arquivo) => {
               const corpo = await converterWebp(arquivo, 512)
-              const resposta = await fetch('/api/me/foto', {
+              const resposta = await fetchApi('/api/me/foto', {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'image/webp' },

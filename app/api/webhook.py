@@ -29,8 +29,8 @@ async def processar_entrada(entrada, provider: MetaProvider, maker: async_sessio
     try:
         async with maker() as db:
             await receber_mensagem(db, provider, entrada)
-    except Exception:
-        logger.exception("Falha ao processar mensagem recebida")
+    except Exception as erro:
+        logger.error("Falha ao processar mensagem recebida (%s)", type(erro).__name__)
 
 
 async def processar_status(status: dict, maker: async_sessionmaker):
@@ -69,7 +69,7 @@ async def processar_status(status: dict, maker: async_sessionmaker):
                 return
         if tentativa < 4:
             await asyncio.sleep(1)
-    logger.debug("Status Meta sem mensagem correspondente: %s", identidade)
+    logger.debug("Status Meta sem mensagem correspondente")
 
 
 @router.get("/webhook/whatsapp", response_class=PlainTextResponse)
@@ -107,15 +107,21 @@ async def webhook(
         raise HTTPException(status_code=400, detail="JSON inválido") from None
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON inválido")
-    global _primeiro_payload
-    if not _primeiro_payload:
-        logger.debug("Primeiro payload Meta: %s", payload)
-        _primeiro_payload = True
     provider = MetaProvider(
         config.meta_graph_version, config.meta_phone_number_id, config.meta_access_token
     )
-    for status in provider.parse_webhook_statuses(payload):
+    statuses = provider.parse_webhook_statuses(payload)
+    mensagens = provider.parse_webhook_mensagens(payload)
+    global _primeiro_payload
+    if not _primeiro_payload:
+        logger.debug(
+            "Primeiro payload Meta recebido: %d status(es), %d mensagem(ns)",
+            len(statuses),
+            len(mensagens),
+        )
+        _primeiro_payload = True
+    for status in statuses:
         tarefas.add_task(processar_status, status, maker)
-    for entrada in provider.parse_webhook_mensagens(payload):
+    for entrada in mensagens:
         tarefas.add_task(processar_entrada, entrada, provider, maker)
     return {"ok": True}

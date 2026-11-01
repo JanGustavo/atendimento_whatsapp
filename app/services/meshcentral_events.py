@@ -197,7 +197,7 @@ async def acompanhar_meshcentral():
     try:
         url = websocket_url(config.meshcentral_url)
     except ValueError as exc:
-        log.error("Monitor MeshCentral desligado: %s", exc)
+        log.error("Monitor MeshCentral desligado (%s)", type(exc).__name__)
         return
 
     auth = ",".join(
@@ -223,7 +223,7 @@ async def acompanhar_meshcentral():
                     except (ValueError, TypeError):
                         log.warning("Mensagem MeshCentral invalida ignorada")
                     except Exception:
-                        log.exception("Erro ao registrar evento MeshCentral")
+                        log.error("Erro ao registrar evento MeshCentral")
         except asyncio.CancelledError:
             raise
         except Exception as exc:

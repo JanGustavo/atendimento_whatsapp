@@ -30,8 +30,8 @@ async def timer_loop() -> None:
         try:
             async with async_session_maker() as db:
                 await verificar_timers(db, provider_atual())
-        except Exception:
-            logger.exception("Falha ao verificar timers")
+        except Exception as erro:
+            logger.error("Falha ao verificar timers (%s)", type(erro).__name__)
         await asyncio.sleep(5)
 
 

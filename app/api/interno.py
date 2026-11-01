@@ -30,6 +30,7 @@ async def setores(
         {
             "id": grupo.id,
             "nome": grupo.nome,
+            "icone": grupo.icone,
             "total_pessoas": sum(pessoa.setor_interno_id == grupo.id for pessoa in pessoas),
             "membros_ativos": sum(pessoa.ativo and pessoa.setor_interno_id == grupo.id for pessoa in pessoas),
             "grupo_ativo": sum(
@@ -196,7 +197,7 @@ async def mensagens_grupo(
 ):
     await grupo_visivel(db, setor_id, user)
     consulta = (
-        select(MensagemGrupo, Usuario.nome)
+        select(MensagemGrupo, Usuario.nome, Usuario.foto_chave)
         .join(Usuario, Usuario.id == MensagemGrupo.remetente_id)
         .where(MensagemGrupo.setor_id == setor_id)
     )
@@ -208,6 +209,11 @@ async def mensagens_grupo(
             "id": item.id,
             "remetente_id": item.remetente_id,
             "remetente_nome": nome,
+            "remetente_foto_url": (
+                f"/api/usuarios/{item.remetente_id}/foto?v={foto_chave}"
+                if foto_chave
+                else None
+            ),
             "texto": item.texto,
             "imagem_url": f"/api/interno/imagens/{item.imagem_chave}"
             if item.imagem_chave
@@ -217,7 +223,7 @@ async def mensagens_grupo(
             "editada_em": item.editada_em.isoformat() if item.editada_em else None,
             "criada_em": item.criada_em.isoformat(),
         }
-        for item, nome in reversed(linhas)
+        for item, nome, foto_chave in reversed(linhas)
     ]
 
 

@@ -26,14 +26,14 @@ async def seed():
         ("Responsável 2", "responsavel2@demo.local", "supervisor"),
     ]
     async with async_session_maker() as db:
-        for identificador, nome in [
-            (1, "Vendas"),
-            (2, "Estoque"),
-            (3, "Garantia"),
-            (4, "Administração"),
+        for identificador, nome, icone in [
+            (1, "Vendas", "vendas"),
+            (2, "Estoque", "estoque"),
+            (3, "Garantia", "garantia"),
+            (4, "Administração", "administracao"),
         ]:
             if not await db.get(SetorInterno, identificador):
-                db.add(SetorInterno(id=identificador, nome=nome))
+                db.add(SetorInterno(id=identificador, nome=nome, icone=icone))
         await db.flush()
         for nome, email, role in pessoas:
             if not (await db.execute(select(Usuario.id).where(Usuario.email == email))).first():
@@ -67,7 +67,8 @@ async def seed():
         ]
         for ordem, nome, responsavel_id in setores:
             if not (await db.execute(select(Setor.id).where(Setor.ordem == ordem))).first():
-                db.add(Setor(ordem=ordem, nome=nome, responsavel_id=responsavel_id))
+                icone = {1: "vendas", 2: "devolucao", 3: "garantia", 4: "equipe"}[ordem]
+                db.add(Setor(ordem=ordem, nome=nome, icone=icone, responsavel_id=responsavel_id))
         usuarios = {
             item.email: item for item in (await db.execute(select(Usuario))).scalars().all()
         }

@@ -8,6 +8,8 @@ const PAGINA = 50
 const INTERVALO_MS = 3000
 const JANELA_AGRUPAR_MS = 5 * 60 * 1000
 const LIMITE_ORIGEM = 12 * 1024 * 1024
+const PAPEL_PAREDE_STORAGE = 'fortgiro.chat-interno.papel-parede'
+const PAPEL_PAREDE_TAMANHO_MAX_MB = 2
 
 /* ───────────── API ───────────── */
 
@@ -60,11 +62,121 @@ function mesclar(atuais, novas) {
   return [...porId.values()].sort((a, b) => a.id - b.id)
 }
 
+export function lerPapelParede(chave = PAPEL_PAREDE_STORAGE) {
+  try {
+    return window.localStorage.getItem(chave) || ''
+  } catch {
+    return ''
+  }
+}
+
+function salvarPapelParede(valor, chave) {
+  try {
+    if (valor) window.localStorage.setItem(chave, valor)
+    else window.localStorage.removeItem(chave)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function PapelParede({ valor, onChange, onErro, chave = PAPEL_PAREDE_STORAGE }) {
+  const arquivo = useRef(null)
+  const [aberto, setAberto] = useState(false)
+  const [link, setLink] = useState(() => (valor.startsWith('http') ? valor : ''))
+
+  function aplicar(novoValor) {
+    if (!salvarPapelParede(novoValor, chave)) {
+      onErro('Não foi possível salvar o papel de parede neste navegador.')
+      return
+    }
+    onChange(novoValor)
+    onErro('')
+    setAberto(false)
+  }
+
+  function escolherArquivo(evento) {
+    const imagem = evento.target.files?.[0]
+    evento.target.value = ''
+    if (!imagem) return
+    if (!imagem.type.startsWith('image/')) {
+      onErro('Escolha um arquivo de imagem.')
+      return
+    }
+    if (imagem.size > PAPEL_PAREDE_TAMANHO_MAX_MB * 1024 * 1024) {
+      onErro(`A imagem deve ter até ${PAPEL_PAREDE_TAMANHO_MAX_MB} MB.`)
+      return
+    }
+    const leitor = new FileReader()
+    leitor.onload = () => aplicar(typeof leitor.result === 'string' ? leitor.result : '')
+    leitor.onerror = () => onErro('Não foi possível ler a imagem escolhida.')
+    leitor.readAsDataURL(imagem)
+  }
+
+  function aplicarLink(evento) {
+    evento.preventDefault()
+    const endereco = link.trim()
+    try {
+      const url = new URL(endereco)
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
+      aplicar(endereco)
+    } catch {
+      onErro('Informe um link válido começando com http:// ou https://.')
+    }
+  }
+
+  return (
+    <div className="int-wallpaper">
+      <button
+        type="button"
+        className="button button-soft int-wallpaper-toggle"
+        aria-expanded={aberto}
+        onClick={() => setAberto(atual => !atual)}
+      >
+        Papel de parede
+      </button>
+      {aberto && (
+        <div className="int-wallpaper-panel">
+          <div className="int-wallpaper-panel-head">
+            <strong>Personalizar chat</strong>
+            <button type="button" className="int-wallpaper-close" onClick={() => setAberto(false)} aria-label="Fechar papel de parede" title="Fechar">×</button>
+          </div>
+          <small>A imagem fica somente neste navegador e não é enviada ao servidor.</small>
+          <input ref={arquivo} type="file" accept="image/*" hidden onChange={escolherArquivo} />
+          <button type="button" className="button button-soft" onClick={() => arquivo.current?.click()}>
+            Escolher imagem
+          </button>
+          <form onSubmit={aplicarLink}>
+            <label>
+              Ou use um link de imagem
+              <input
+                type="url"
+                value={link}
+                placeholder="https://exemplo.com/fundo.jpg"
+                onChange={evento => setLink(evento.target.value)}
+              />
+            </label>
+            <button type="submit" className="button button-primary">Usar link</button>
+          </form>
+          {valor && (
+            <button type="button" className="text-button" onClick={() => { aplicar(''); setLink('') }}>
+              Usar fundo branco
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ───────────── ícones ───────────── */
 
 const ICONES = {
   estoque: <path d="M3 7 12 3l9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10" />,
   garantia: <path d="M12 2 20 5v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5zM9 12l2 2 4-4" />,
+  devolucao: <><path d="M4 7h11a5 5 0 0 1 0 10H7" /><path d="m8 3-4 4 4 4" /></>,
+  atendimento: <><path d="M3 12a9 9 0 0 1 18 0" /><path d="M3 12v5a2 2 0 0 0 2 2h2v-7H3zm18 0v7h-4v-7h4zM17 19a5 5 0 0 1-5 3" /></>,
+  administracao: <><path d="M3 20h18M5 20V6l7-3 7 3v14M9 9h1m4 0h1M9 13h1m4 0h1" /></>,
   vendas: <path d="M3 4h8l10 10-7 7L4 11V4zM7.5 7.5h.01" />,
   equipe: <><circle cx="9" cy="8" r="3" /><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 5v1" /></>,
   clipe: <path d="m21 11.5-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
@@ -80,11 +192,11 @@ const ICONES = {
   apagar: <><path d="M4 7h16M10 4h4M6 7l1 13h10l1-13M10 11v6m4-6v6" /></>,
 }
 
-function Icone({ nome, tamanho = 20, className }) {
+export function Icone({ nome, tamanho = 20, className }) {
   return (
     <svg className={className} width={tamanho} height={tamanho} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {ICONES[nome]}
+      {ICONES[nome] || ICONES.equipe}
     </svg>
   )
 }
@@ -244,7 +356,7 @@ function Diretorio({ setores, conversas, aberto, onAlternar, colegaId, grupoId, 
               ? onGrupo(setores.find(setor => setor.id === item.alvo_id) || { id: item.alvo_id, nome: item.nome })
               : onPessoa(setores.flatMap(setor => setor.pessoas).find(pessoa => pessoa.id === item.alvo_id) || { id: item.alvo_id, nome: item.nome, foto_url: item.foto_url, ativo: true }))}>
             {item.tipo === 'grupo'
-              ? <span className="conversation-avatar" aria-hidden="true"><Icone nome="equipe" tamanho={18} /></span>
+              ? <span className="conversation-avatar" aria-hidden="true"><Icone nome={setores.find(setor => setor.id === item.alvo_id)?.icone || 'equipe'} tamanho={18} /></span>
               : <Avatar nome={item.nome} fotoUrl={item.foto_url} />}
             <span className="conversation-item-main"><strong>{item.tipo === 'grupo' ? `Grupo · ${item.nome}` : item.nome}</strong>
               <small className="int-preview">{item.ultimo_remetente ? `${item.ultimo_remetente}: ` : ''}{item.ultima_previa || 'Conversa sem mensagens'}</small></span>
@@ -258,7 +370,7 @@ function Diretorio({ setores, conversas, aberto, onAlternar, colegaId, grupoId, 
           return (
             <section key={setor.id}>
               <button type="button" className="int-sector-button" aria-expanded={expandido} onClick={() => onAlternar(setor.id)}>
-                <span className="int-sector-icon"><Icone nome={iconeDoSetor(setor.nome)} tamanho={18} /></span>
+                <span className="int-sector-icon"><Icone nome={setor.icone || iconeDoSetor(setor.nome)} tamanho={18} /></span>
                 <span className="int-sector-text">
                   <strong>{setor.nome}</strong>
                   <small>{online} online · {plural(setor.total_pessoas, 'pessoa', 'pessoas')}</small>
@@ -271,7 +383,7 @@ function Diretorio({ setores, conversas, aberto, onAlternar, colegaId, grupoId, 
                   {setor.grupo_ativo && (
                     <li>
                       <button type="button" className={grupoId === setor.id ? 'conversation-item int-person selected' : 'conversation-item int-person'} onClick={() => onGrupo(setor)}>
-                        <span className="conversation-avatar" aria-hidden="true"><Icone nome={iconeDoSetor(setor.nome)} tamanho={18} /></span>
+                        <span className="conversation-avatar" aria-hidden="true"><Icone nome={setor.icone || iconeDoSetor(setor.nome)} tamanho={18} /></span>
                         <span className="conversation-item-main"><strong>Grupo · {setor.nome}</strong><small>Todos os membros ativos</small></span>
                       </button>
                     </li>
@@ -313,7 +425,7 @@ function CabecalhoChat({ grupo, colega, onVoltar, onImagem }) {
       <div className="chat-person">
         <button type="button" className="int-back" onClick={onVoltar} aria-label="Voltar para a lista"><Icone nome="voltar" /></button>
         {grupo
-          ? <span className="conversation-avatar large" aria-hidden="true"><Icone nome={iconeDoSetor(grupo.nome)} /></span>
+          ? <span className="conversation-avatar large" aria-hidden="true"><Icone nome={grupo.icone || iconeDoSetor(grupo.nome)} /></span>
           : (
             <button
               type="button"
@@ -338,7 +450,7 @@ function CabecalhoChat({ grupo, colega, onVoltar, onImagem }) {
   )
 }
 
-function ListaMensagens({ mensagens, meId, ehGrupo, temAnteriores, onAnteriores, onImagem, onApagar, onEditar }) {
+function ListaMensagens({ mensagens, meId, nomeRemetente, fotoRemetente, ehGrupo, temAnteriores, onAnteriores, onImagem, onApagar, onEditar }) {
   const area = useRef(null)
   const [menuId, setMenuId] = useState(null)
   const [editandoId, setEditandoId] = useState(null)
@@ -396,8 +508,12 @@ function ListaMensagens({ mensagens, meId, ehGrupo, temAnteriores, onAnteriores,
           <Fragment key={mensagem.id}>
             {novoDia && <div className="day-divider"><span>{messageDay(mensagem.criada_em)}</span></div>}
             <div className={`message-row${minha ? ' message-outgoing' : ''}${continua ? ' int-cont' : ''}`}>
-              <div className={minha ? 'message-bubble message-bubble-outgoing' : 'message-bubble'}>
-                {!minha && ehGrupo && !continua && <div className="message-label">{mensagem.remetente_nome}</div>}
+              <div className={`${minha ? 'message-bubble message-bubble-outgoing' : 'message-bubble'}${!minha && !continua ? ' int-bubble-with-author' : ''}`}>
+                {!minha && !continua && <div className="int-message-author"><Avatar
+                  nome={ehGrupo ? mensagem.remetente_nome : nomeRemetente}
+                  fotoUrl={ehGrupo ? mensagem.remetente_foto_url : fotoRemetente}
+                /></div>}
+                {!minha && !continua && ehGrupo && <div className="message-label">{mensagem.remetente_nome}</div>}
                 {editandoId === mensagem.id ? <form className="int-edit-form" onSubmit={async evento => {
                   evento.preventDefault()
                   if (!textoEditado.trim() || salvando) return
@@ -624,6 +740,8 @@ function Conversa({ rotas, grupo, colega, me, onVoltar, onImagem, onErro, atuali
       <ListaMensagens
         mensagens={mensagens}
         meId={me.id}
+        nomeRemetente={grupo ? null : colega.nome}
+        fotoRemetente={grupo ? null : colega.foto_url}
         ehGrupo={Boolean(grupo)}
         temAnteriores={temAnteriores}
         onAnteriores={carregarAnteriores}
@@ -664,6 +782,23 @@ export default function Interno({ me, abrirColegaId, onOpen, onUnreadChange, onV
   const [grupoSel, setGrupoSel] = useState(null)
   const [imagemAberta, setImagemAberta] = useState(null)
   const [conversas, setConversas] = useState([])
+  const [papelParede, setPapelParede] = useState(lerPapelParede)
+  const [papelParedeValido, setPapelParedeValido] = useState('')
+
+  useEffect(() => {
+    if (!papelParede) {
+      setPapelParedeValido('')
+      return undefined
+    }
+    const imagem = new Image()
+    imagem.onload = () => setPapelParedeValido(papelParede)
+    imagem.onerror = () => setPapelParedeValido('')
+    imagem.src = papelParede
+    return () => {
+      imagem.onload = null
+      imagem.onerror = null
+    }
+  }, [papelParede])
 
   const abrirImagem = useCallback((url, titulo) => {
     if (!url) return
@@ -722,7 +857,15 @@ export default function Interno({ me, abrirColegaId, onOpen, onUnreadChange, onV
           onAlternar={id => setAberto(atual => (atual === id ? null : id))}
           onPessoa={selecionarPessoa} onGrupo={selecionarGrupo}
         />
-        <section className="chat-pane" aria-label="Conversa">
+        <section
+          className="chat-pane"
+          aria-label="Conversa"
+          style={papelParedeValido ? {
+            '--int-wallpaper': `url("${papelParedeValido}")`,
+            '--int-wallpaper-size': 'cover',
+          } : undefined}
+        >
+          <PapelParede valor={papelParede} onChange={setPapelParede} onErro={setErro} />
           {!rotas ? (
             <div className="chat-placeholder">
               <span className="placeholder-mark"><Icone nome="conversa" tamanho={34} /></span>

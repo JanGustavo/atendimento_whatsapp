@@ -40,6 +40,7 @@ class Setor(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(80), unique=True)
     ordem: Mapped[int] = mapped_column(Integer, unique=True)
+    icone: Mapped[str] = mapped_column(String(24), default="equipe", nullable=False)
     responsavel_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
     responsavel: Mapped[Usuario | None] = relationship()
 
@@ -48,6 +49,7 @@ class SetorInterno(Base):
     __tablename__ = "setores_internos"
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(80), unique=True)
+    icone: Mapped[str] = mapped_column(String(24), default="equipe", nullable=False)
 
 
 class MensagemInterna(Base):

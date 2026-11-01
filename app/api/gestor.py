@@ -26,6 +26,7 @@ from app.providers import provider_para_numero
 from app.services.auth_service import get_password_hash
 
 router = APIRouter(prefix="/api/gestor")
+ICONES_SETOR = {"equipe", "vendas", "estoque", "garantia", "devolucao", "atendimento", "administracao"}
 
 
 @router.post("/setores-internos")
@@ -34,15 +35,19 @@ async def criar_setor_interno(
     db: AsyncSession = Depends(get_db),
     user: UsuarioAtual = Depends(somente_gestor),
 ):
-    nome = (await form(request)).get("nome", "").strip()
+    dados = await form(request)
+    nome = dados.get("nome", "").strip()
+    icone = dados.get("icone", "equipe")
     if not 1 <= len(nome) <= 80:
         raise HTTPException(status_code=422, detail="Nome do setor inválido")
+    if icone not in ICONES_SETOR:
+        raise HTTPException(status_code=422, detail="Ícone inválido")
     if (await db.execute(select(SetorInterno.id).where(SetorInterno.nome == nome))).first():
         raise HTTPException(status_code=409, detail="Setor já existe")
-    setor = SetorInterno(nome=nome)
+    setor = SetorInterno(nome=nome, icone=icone)
     db.add(setor)
     await db.commit()
-    return {"id": setor.id, "nome": setor.nome}
+    return {"id": setor.id, "nome": setor.nome, "icone": setor.icone}
 
 
 @router.post("/setores-internos/{setor_id}")
@@ -55,17 +60,22 @@ async def renomear_setor_interno(
     setor = await db.get(SetorInterno, setor_id)
     if setor is None:
         raise HTTPException(status_code=404, detail="Setor não encontrado")
-    nome = (await form(request)).get("nome", "").strip()
+    dados = await form(request)
+    nome = dados.get("nome", "").strip()
+    icone = dados.get("icone", setor.icone)
     if not 1 <= len(nome) <= 80:
         raise HTTPException(status_code=422, detail="Nome do setor inválido")
+    if icone not in ICONES_SETOR:
+        raise HTTPException(status_code=422, detail="Ícone inválido")
     if (
         nome != setor.nome
         and (await db.execute(select(SetorInterno.id).where(SetorInterno.nome == nome))).first()
     ):
         raise HTTPException(status_code=409, detail="Setor já existe")
     setor.nome = nome
+    setor.icone = icone
     await db.commit()
-    return {"id": setor.id, "nome": setor.nome}
+    return {"id": setor.id, "nome": setor.nome, "icone": setor.icone}
 
 
 @router.post("/simulador")
@@ -151,10 +161,13 @@ async def editar_usuario(
     usuario.online = dados.get("online") == "on"
     if "setor_interno_id" in dados:
         setor_id = dados["setor_interno_id"]
-        setor_interno = await db.get(SetorInterno, int(setor_id)) if setor_id.isdecimal() else None
-        if setor_interno is None:
-            raise HTTPException(status_code=422, detail="Setor interno inválido")
-        usuario.setor_interno_id = setor_interno.id
+        if setor_id:
+            setor_interno = await db.get(SetorInterno, int(setor_id)) if setor_id.isdecimal() else None
+            if setor_interno is None:
+                raise HTTPException(status_code=422, detail="Setor interno inválido")
+            usuario.setor_interno_id = setor_interno.id
+        else:
+            usuario.setor_interno_id = None
     if dados.get("senha"):
         if len(dados["senha"]) < 8:
             raise HTTPException(status_code=422)
@@ -175,8 +188,11 @@ async def configurar_setor(
         raise HTTPException(status_code=404)
     dados = await form(request)
     nome = dados.get("nome", setor.nome).strip()
+    icone = dados.get("icone", setor.icone)
     if not nome or len(nome) > 80:
         raise HTTPException(status_code=422, detail="Nome do setor inválido")
+    if icone not in ICONES_SETOR:
+        raise HTTPException(status_code=422, detail="Ícone inválido")
     if (
         nome != setor.nome
         and (await db.execute(select(Setor.id).where(Setor.nome == nome))).first()
@@ -189,6 +205,7 @@ async def configurar_setor(
     ):
         raise HTTPException(status_code=422, detail="Responsável inválido")
     setor.nome = nome
+    setor.icone = icone
     setor.responsavel_id = responsavel.id if responsavel else None
     await db.commit()
     return {"ok": True}

@@ -326,11 +326,12 @@ async def configuracao_gestor(
     simulador = await db.get(SimuladorEstado, 1)
     return {
         "simulador_ativo": bool(simulador and simulador.ativo),
-        "setores_internos": [{"id": item.id, "nome": item.nome} for item in setores_internos],
+        "setores_internos": [{"id": item.id, "nome": item.nome, "icone": item.icone} for item in setores_internos],
         "usuarios": [
             {
                 "id": item.id,
                 "nome": item.nome,
+                "foto_url": foto_url(item),
                 "email": item.email,
                 "role": item.role,
                 "ativo": item.ativo,
@@ -344,6 +345,7 @@ async def configuracao_gestor(
                 "id": item.id,
                 "ordem": item.ordem,
                 "nome": item.nome,
+                "icone": item.icone,
                 "responsavel_id": item.responsavel_id,
             }
             for item in setores

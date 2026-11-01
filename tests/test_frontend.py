@@ -34,3 +34,21 @@ async def test_painel_react_e_api_isolada_por_papel(ambiente):
     assert len(config["setores"]) == 4
     assert "senha_hash" not in config["usuarios"][0]
     assert (await client.get("/api/simulador?cliente=cliente1")).status_code == 200
+
+
+async def test_gestor_configura_icones_dos_setores(ambiente):
+    client, _ = ambiente
+    await entrar(client, "gestor@teste.local")
+    assert (await client.post("/api/gestor/setores/1", data={
+        "nome": "Vendas/Compra", "icone": "invalido",
+    })).status_code == 422
+    assert (await client.post("/api/gestor/setores/1", data={
+        "nome": "Vendas/Compra", "icone": "vendas",
+    })).status_code == 200
+    assert (await client.post("/api/gestor/setores-internos", data={
+        "nome": "Pós-venda", "icone": "atendimento",
+    })).status_code == 200
+    config = (await client.get("/api/gestor/config")).json()
+    assert config["setores"][0]["icone"] == "vendas"
+    assert next(item for item in config["setores_internos"] if item["nome"] == "Pós-venda")["icone"] == "atendimento"
+    assert next(item for item in (await client.get("/api/interno/setores")).json() if item["nome"] == "Pós-venda")["icone"] == "atendimento"

@@ -44,14 +44,22 @@ Fontes upstream:
    público no `cloudflared` somente para leitura. A aplicação Cloudflare Access
    desse host reutiliza a política de e-mails permitidos do painel. **Esta
    proteção também bloqueia o MeshAgent**, que não faz login interativo no
-   Access. Antes de instalar agentes externos, definir e testar uma rota de
-   agente separada com autenticação apropriada; não criar uma regra de bypass
-   geral para todo o host. A disponibilidade da tela HTTPS não comprova que
-   o agente consegue se registrar.
+   Access. Para agentes externos, configure `agentPort=444`,
+   `agentAliasDNS=mesh-agent.jangustavo.me`, `agentAliasPort=443` e
+   `agentPortTls=true` em `settings` do `meshcentral-data/config.json`.
+   Publique somente `mesh-agent.jangustavo.me` no Tunnel apontando para
+   `https://meshcentral:444`, com `Origin Server Name` igual a
+   `mesh.jangustavo.me`, `CA Pool` em
+   `/meshcentral-certs/root-cert-public.crt` e verificação TLS ativa.
+   A porta 444 aceita apenas agentes; ela não oferece a interface de
+   administração. Não crie bypass para `mesh.jangustavo.me`. A rota do
+   agente precisa ser validada com um PC real antes de considerá-la pronta.
 2. Na interface MeshCentral, crie grupo de dispositivos e instale o agente
    oficial a partir da opção de adicionar dispositivos, **com consentimento
-   dos usuários envolvidos**. Confira que o nó está online e anote seu
-   identificador completo `node/<dominio>/<id>`.
+   dos usuários envolvidos**. Gere o instalador somente depois de configurar
+   o endereço de agente: instaladores antigos podem apontar para o host da
+   interface protegido pelo Cloudflare Access. Confira que o nó está online
+   e anote seu identificador completo `node/<dominio>/<id>`.
 3. Configure no `meshcentral-data/config.json` do servidor as políticas
    obrigatórias de prompt e barra de privacidade. Use o exemplo oficial
    `sample-config-advanced.json` para o domínio da sua versão:

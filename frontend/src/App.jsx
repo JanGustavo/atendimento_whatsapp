@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Chamados, { ChamadosVendedor } from './Chamados.jsx'
 import { messageDay } from './dates.js'
-import Interno from './Interno.jsx'
+import Interno, { Icone, PapelParede, lerPapelParede } from './Interno.jsx'
 import Perfil from './Perfil.jsx'
 import ModalImagem from './ModalImagem.jsx'
 import { converterWebp } from './images.js'
@@ -27,6 +27,20 @@ const routeByPage = {
 const pageByRoute = Object.fromEntries(
   Object.entries(routeByPage).map(([page, route]) => [route, page]),
 )
+const PAPEL_PAREDE_WPP = 'fortgiro.whatsapp.papel-parede'
+const SETOR_ICONES = [
+  ['equipe', 'Equipe'], ['vendas', 'Vendas'], ['estoque', 'Estoque'],
+  ['garantia', 'Garantia'], ['devolucao', 'Devolução'],
+  ['atendimento', 'Atendimento'], ['administracao', 'Administração'],
+]
+
+function SeletorIcone({ valor, onChange }) {
+  return <label className="manager-icon-picker">Ícone
+    <span><Icone nome={valor} tamanho={18} /><select value={valor} onChange={evento => onChange(evento.target.value)} aria-label="Ícone do setor">
+      {SETOR_ICONES.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
+    </select></span>
+  </label>
+}
 
 function allowedPage(page, role) {
   if (page === 'manager' || page === 'simulator') return role === 'gestor'
@@ -182,8 +196,18 @@ function Icon({ name, size = 19 }) {
         <path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 5v1" />
       </>
     ),
+    person: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
   }
   return <svg {...common}>{paths[name]}</svg>
+}
+
+function AvatarContato({ nome, fotoUrl, grande = false }) {
+  // Nomes do WhatsApp podem usar letras Unicode estilizadas sem glifos na fonte do painel.
+  const iniciaisContato = nome?.normalize('NFKC').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((parte) => parte[0].toUpperCase()).join('')
+  return <span className={`contact-avatar${grande ? ' contact-avatar-large' : ''}`} aria-hidden="true">
+    <span className="contact-avatar-fallback">{iniciaisContato || <Icon name="person" size={grande ? 25 : 20} />}</span>
+    {fotoUrl && <img key={fotoUrl} src={fotoUrl} alt="" onError={(event) => { event.currentTarget.hidden = true }} />}
+  </span>
 }
 
 function Badge({ status, children }) {
@@ -271,7 +295,7 @@ function Login({ onLogin, busy, error }) {
   )
 }
 
-function MessageBubbles({ messages, simulator = false, onRetry, onEdit, onDiscard, onImagem, currentUserId, busy = false }) {
+function MessageBubbles({ messages, simulator = false, onRetry, onEdit, onDiscard, onImagem, currentUserId, contactName, contactPhoto, busy = false }) {
   const bottom = React.useRef(null)
   const [editId, setEditId] = useState(null)
   const [editText, setEditText] = useState('')
@@ -323,7 +347,8 @@ function MessageBubbles({ messages, simulator = false, onRetry, onEdit, onDiscar
               </div>
             )}
             <div className={`message-row ${outgoing ? 'message-outgoing' : ''}`}>
-              <div className={`message-bubble ${outgoing ? 'message-bubble-outgoing' : ''}`}>
+              <div className={`message-bubble ${outgoing ? 'message-bubble-outgoing' : ''}${!simulator && message.origem === 'cliente' ? ' wpp-bubble-with-avatar' : ''}`}>
+                {!simulator && message.origem === 'cliente' && <span className="wpp-message-avatar"><AvatarContato nome={contactName} fotoUrl={contactPhoto} /></span>}
                 <div className="message-label">{label}</div>
                 {message.imagem_url && (
                   <button
@@ -451,6 +476,9 @@ function Inbox({
   const [segundosGravacao, setSegundosGravacao] = useState(0)
   const [anexosAbertos, setAnexosAbertos] = useState(false)
   const [previaWpp, setPreviaWpp] = useState(null)
+  const [papelParede, setPapelParede] = useState(() => lerPapelParede(PAPEL_PAREDE_WPP))
+  const [papelParedeValido, setPapelParedeValido] = useState('')
+  const [erroPapelParede, setErroPapelParede] = useState('')
   const destinoRef = useRef(null)
   const fotoRef = useRef(null)
   const arquivoWppRef = useRef(null)
@@ -465,6 +493,14 @@ function Inbox({
   useEffect(() => setDestino(''), [selectedId])
   useEffect(() => { setImagemWpp(null); setPreviaWpp(null) }, [selectedId])
   useEffect(() => setAnexosAbertos(false), [selectedId])
+  useEffect(() => {
+    if (!papelParede) { setPapelParedeValido(''); return undefined }
+    const imagem = new Image()
+    imagem.onload = () => setPapelParedeValido(papelParede)
+    imagem.onerror = () => { setPapelParedeValido(''); setErroPapelParede('Não foi possível carregar o papel de parede.') }
+    imagem.src = papelParede
+    return () => { imagem.onload = null; imagem.onerror = null }
+  }, [papelParede])
   useEffect(() => {
     if (!gravando) return undefined
     const intervalo = window.setInterval(() => setSegundosGravacao((valor) => valor + 1), 1000)
@@ -658,9 +694,7 @@ function Inbox({
                     aria-current={ativa ? 'true' : undefined}
                     onClick={() => onSelect(conversa.id)}
                   >
-                    <span className="conversation-avatar" aria-hidden="true">
-                      {conversa.foto_url ? <img className="int-avatar-photo" src={conversa.foto_url} alt="" /> : (conversa.nome_contato?.trim().slice(0, 1).toUpperCase() || conversa.numero.slice(-2))}
-                    </span>
+                    <AvatarContato nome={conversa.nome_contato} fotoUrl={conversa.foto_url} />
                     <span className="conversation-item-main">
                       <strong className="atendimento-numero">{conversa.numero}</strong>
                       <small className="atendimento-contato">{conversa.nome_contato || 'Contato sem nome salvo'}</small>
@@ -711,7 +745,12 @@ function Inbox({
           </div>
         )}
       </aside>
-      <section className="chat-pane" aria-label="Conversa selecionada">
+      <section className="chat-pane" aria-label="Conversa selecionada" style={papelParedeValido ? {
+        '--wpp-wallpaper': `url("${papelParedeValido}")`,
+        '--wpp-wallpaper-size': 'cover',
+      } : undefined}>
+        <PapelParede valor={papelParede} onChange={setPapelParede} onErro={setErroPapelParede} chave={PAPEL_PAREDE_WPP} />
+        {erroPapelParede && <div className="wpp-wallpaper-toast" role="alert">{erroPapelParede}<button type="button" onClick={() => setErroPapelParede('')} aria-label="Fechar aviso">×</button></div>}
         {!temSelecao ? (
           <div className="chat-placeholder">
             <div className="placeholder-mark">
@@ -737,9 +776,7 @@ function Inbox({
             <div className="chat-header atendimento-cabecalho">
               <div className="chat-person">
                 {botaoVoltar}
-                <div className="conversation-avatar large" aria-hidden="true">
-                  {selected.foto_url ? <img className="int-avatar-photo" src={selected.foto_url} alt="" /> : (selected.nome_contato?.trim().slice(0, 1).toUpperCase() || selected.numero.slice(-2))}
-                </div>
+                <AvatarContato nome={selected.nome_contato} fotoUrl={selected.foto_url} grande />
                 <div className="atendimento-titulo">
                   <h3>{selected.numero}</h3>
                   <small className="atendimento-contato">{selected.nome_contato || 'Contato sem nome salvo'}</small>
@@ -777,6 +814,8 @@ function Inbox({
               key={selected.id}
               messages={atual.mensagens}
               currentUserId={me.id}
+              contactName={selected.nome_contato}
+              contactPhoto={selected.foto_url}
               onRetry={(messageId) => onRetry(selected.id, messageId)}
               onEdit={(messageId, texto) => onEdit(selected.id, messageId, texto)}
               onDiscard={(messageId) => onDiscard(selected.id, messageId)}
@@ -925,165 +964,82 @@ function Inbox({
 
 function UserEditor({ user, setoresInternos, onSave, busy }) {
   const [value, setValue] = useState({ ...user, senha: '' })
+  const [aberto, setAberto] = useState(false)
   return (
-    <form
-      className="user-row user-card"
-      onSubmit={async (event) => {
-        event.preventDefault()
-        if (await onSave(user.id, value)) setValue({ ...value, senha: '' })
-      }}
-    >
-      <div className="user-card-heading">
-        <span className="user-avatar">{initials(value.nome)}</span>
-        <div>
-          <strong>{value.nome}</strong>
-          <small>Usuário #{user.id}</small>
-        </div>
-      </div>
-      <div className="user-card-fields">
-        <label>
-          Nome
-          <input
-            value={value.nome}
-            onChange={(event) => setValue({ ...value, nome: event.target.value })}
-            required
-          />
-        </label>
-        <label>
-          Email de acesso
-          <input
-            type="email"
-            value={value.email}
-            onChange={(event) => setValue({ ...value, email: event.target.value })}
-            required
-          />
-        </label>
-        <label>
-          Permissão
-          <select
-            value={value.role}
-            onChange={(event) => setValue({ ...value, role: event.target.value })}
-          >
-            <option value="colaborador">Colaborador</option>
-            <option value="supervisor">Supervisor</option>
-            <option value="gestor">Gestor</option>
-          </select>
-        </label>
-        <label>
-          Setor/equipe
-          <select
-            value={value.setor_interno_id || ''}
-            onChange={(event) => setValue({ ...value, setor_interno_id: event.target.value })}
-          >
-            <option value="">Sem setor</option>
-            {setoresInternos.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.nome}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Redefinir senha
-          <input
-            type="password"
-            placeholder="Deixe em branco para manter"
-            minLength="8"
-            value={value.senha}
-            onChange={(event) => setValue({ ...value, senha: event.target.value })}
-          />
-        </label>
-      </div>
-      <div className="user-card-actions">
-        <label className="switch-line">
-          <input
-            type="checkbox"
-            checked={value.ativo}
-            onChange={(event) => setValue({ ...value, ativo: event.target.checked })}
-          />
-          <span>Ativo</span>
-        </label>
-        <label className="switch-line">
-          <input
-            type="checkbox"
-            checked={value.online}
-            onChange={(event) => setValue({ ...value, online: event.target.checked })}
-          />
-          <span>Online</span>
-        </label>
-        <button className="button button-soft" disabled={busy}>
-          Salvar alterações
-        </button>
-      </div>
-    </form>
+    <Fragment>
+      <tr>
+        <td><div className="manager-contact"><AvatarContato nome={value.nome} fotoUrl={value.foto_url} /><div><strong>{value.nome}</strong><small>Usuário #{user.id}</small></div></div></td>
+        <td>{value.email}</td>
+        <td>{roleName[value.role]}</td>
+        <td>{setoresInternos.find(item => item.id === Number(value.setor_interno_id))?.nome || '—'}</td>
+        <td><span className={`manager-state ${value.ativo ? 'is-active' : ''}`}>{value.ativo ? 'Ativo' : 'Inativo'}</span></td>
+        <td><button type="button" className="button button-soft" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button></td>
+      </tr>
+      {aberto && <tr className="manager-detail-row"><td colSpan="6"><form className="manager-edit-grid" onSubmit={async evento => {
+        evento.preventDefault()
+        if (await onSave(user.id, value)) { setValue({ ...value, senha: '' }); setAberto(false) }
+      }}>
+        <label>Nome<input value={value.nome} onChange={evento => setValue({ ...value, nome: evento.target.value })} required /></label>
+        <label>Email de acesso<input type="email" value={value.email} onChange={evento => setValue({ ...value, email: evento.target.value })} required /></label>
+        <label>Permissão<select value={value.role} onChange={evento => setValue({ ...value, role: evento.target.value })}><option value="colaborador">Colaborador</option><option value="supervisor">Supervisor</option><option value="gestor">Gestor</option></select></label>
+        <label>Setor/equipe<select value={value.setor_interno_id || ''} onChange={evento => setValue({ ...value, setor_interno_id: evento.target.value })}><option value="">Sem setor</option>{setoresInternos.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></label>
+        <label>Redefinir senha<input type="password" placeholder="Deixe em branco para manter" minLength="8" value={value.senha} onChange={evento => setValue({ ...value, senha: evento.target.value })} /></label>
+        <label className="switch-line"><input type="checkbox" checked={value.ativo} onChange={evento => setValue({ ...value, ativo: evento.target.checked })} />Ativo</label>
+        <label className="switch-line"><input type="checkbox" checked={value.online} onChange={evento => setValue({ ...value, online: evento.target.checked })} />Disponível</label>
+        <button className="button button-primary" disabled={busy}>Salvar alterações</button>
+      </form></td></tr>}
+    </Fragment>
   )
 }
 
 function SectorEditor({ sector, users, onSave, busy }) {
   const [nome, setNome] = useState(sector.nome)
   const [responsavel, setResponsavel] = useState(sector.responsavel_id || '')
+  const [icone, setIcone] = useState(sector.icone || 'equipe')
+  const [aberto, setAberto] = useState(false)
   return (
-    <form
-      className="sector-row"
-      onSubmit={(event) => {
-        event.preventDefault()
-        onSave(sector.id, { nome, responsavel_id: responsavel })
-      }}
-    >
-      <span className="sector-number">{String(sector.ordem).padStart(2, '0')}</span>
-      <input
-        aria-label={`Nome do setor ${sector.ordem}`}
-        value={nome}
-        onChange={(event) => setNome(event.target.value)}
-        required
-      />
-      <select
-        aria-label={`Responsável pelo setor ${sector.ordem}`}
-        value={responsavel}
-        onChange={(event) => setResponsavel(event.target.value)}
-        disabled={sector.ordem === 1}
-      >
-        <option value="">
-          {sector.ordem === 1 ? 'Distribuição entre a equipe de Vendas' : 'Selecionar supervisor'}
-        </option>
-        {users
-          .filter((item) => item.role === 'supervisor' && item.ativo)
-          .map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.nome}
-            </option>
-          ))}
-      </select>
-      <button className="button button-soft" disabled={busy}>
-        Salvar
-      </button>
-    </form>
+    <Fragment>
+      <tr>
+        <td><div className="manager-contact"><span className="manager-sector-icon"><Icone nome={icone} tamanho={20} /></span><div><strong>{nome}</strong><small>Opção {sector.ordem} do menu</small></div></div></td>
+        <td>{SETOR_ICONES.find(item => item[0] === icone)?.[1]}</td>
+        <td>{sector.ordem === 1 ? 'Distribuição entre vendedores' : users.find(item => item.id === Number(responsavel))?.nome || 'Sem responsável'}</td>
+        <td><button type="button" className="button button-soft" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button></td>
+      </tr>
+      {aberto && <tr className="manager-detail-row"><td colSpan="4"><form className="manager-edit-grid" onSubmit={async evento => {
+        evento.preventDefault()
+        if (await onSave(sector.id, { nome, icone, responsavel_id: responsavel })) setAberto(false)
+      }}>
+        <label>Nome<input aria-label={`Nome do setor ${sector.ordem}`} value={nome} onChange={evento => setNome(evento.target.value)} required /></label>
+        <SeletorIcone valor={icone} onChange={setIcone} />
+        {sector.ordem !== 1 && <label>Responsável<select aria-label={`Responsável pelo setor ${sector.ordem}`} value={responsavel} onChange={evento => setResponsavel(evento.target.value)}><option value="">Selecionar supervisor</option>{users.filter(item => item.role === 'supervisor' && item.ativo).map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></label>}
+        <button className="button button-primary" disabled={busy}>Salvar</button>
+      </form></td></tr>}
+    </Fragment>
   )
 }
 
-function InternalSectorEditor({ sector, onSave, busy }) {
+function InternalSectorEditor({ sector, membros, onSave, busy }) {
   const [nome, setNome] = useState(sector.nome)
+  const [icone, setIcone] = useState(sector.icone || 'equipe')
+  const [aberto, setAberto] = useState(false)
   return (
-    <form
-      className="sector-row"
-      onSubmit={(event) => {
-        event.preventDefault()
-        onSave(sector.id, { nome })
-      }}
-    >
-      <span className="sector-number">#{sector.id}</span>
-      <input
-        aria-label={`Nome da equipe ${sector.nome}`}
-        value={nome}
-        onChange={(event) => setNome(event.target.value)}
-        maxLength="80"
-        required
-      />
-      <span className="muted">Grupo automático com 2 ou mais membros ativos</span>
-      <button className="button button-soft" disabled={busy}>
-        Salvar
-      </button>
-    </form>
+    <Fragment>
+      <tr>
+        <td><div className="manager-contact"><span className="manager-sector-icon"><Icone nome={icone} tamanho={20} /></span><div><strong>{nome}</strong><small>Equipe interna</small></div></div></td>
+        <td>{SETOR_ICONES.find(item => item[0] === icone)?.[1]}</td>
+        <td>{membros} {membros === 1 ? 'membro ativo' : 'membros ativos'}</td>
+        <td><span className={`manager-state ${membros >= 2 ? 'is-active' : ''}`}>{membros >= 2 ? 'Grupo ativo' : 'Grupo inativo'}</span></td>
+        <td><button type="button" className="button button-soft" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button></td>
+      </tr>
+      {aberto && <tr className="manager-detail-row"><td colSpan="5"><form className="manager-edit-grid" onSubmit={async evento => {
+        evento.preventDefault()
+        if (await onSave(sector.id, { nome, icone })) setAberto(false)
+      }}>
+        <label>Nome<input aria-label={`Nome da equipe ${sector.nome}`} value={nome} onChange={evento => setNome(evento.target.value)} maxLength="80" required /></label>
+        <SeletorIcone valor={icone} onChange={setIcone} />
+        <button className="button button-primary" disabled={busy}>Salvar</button>
+      </form></td></tr>}
+    </Fragment>
   )
 }
 
@@ -1111,6 +1067,7 @@ function Manager({
     setor_interno_id: 1,
   })
   const [newInternalSector, setNewInternalSector] = useState('')
+  const [newInternalIcone, setNewInternalIcone] = useState('equipe')
   const [transfers, setTransfers] = useState({})
   const [tab, setTab] = useState('conversas')
   const users = config?.usuarios || []
@@ -1236,10 +1193,16 @@ function Manager({
                   return (
                     <tr key={conversa.id}>
                       <td>
-                        <button className="table-link" onClick={() => onOpen(conversa.id)}>
-                          {conversa.numero}
-                        </button>
-                        <small>{time(conversa.criada_em)}</small>
+                        <div className="manager-contact">
+                          <AvatarContato nome={conversa.nome_contato} fotoUrl={conversa.foto_url} />
+                          <div>
+                            <button className="table-link" onClick={() => onOpen(conversa.id)}>
+                              {conversa.numero}
+                            </button>
+                            <small>{conversa.nome_contato || 'Contato sem nome salvo'}</small>
+                            <small>{time(conversa.criada_em)}</small>
+                          </div>
+                        </div>
                       </td>
                       <td>{conversa.setor_nome || 'Escolhendo'}</td>
                       <td>{conversa.atribuido_nome || '—'}</td>
@@ -1354,42 +1317,27 @@ function Manager({
               Criar usuário
             </button>
           </form>
-          <div className="user-list">
-            {users.map((item) => (
-              <UserEditor
-                key={item.id}
-                user={item}
-                setoresInternos={config?.setores_internos || []}
-                onSave={onSaveUser}
-                busy={busy}
-              />
-            ))}
+          <div className="table-wrap manager-list-table">
+            <table><thead><tr><th>Usuário</th><th>Email</th><th>Permissão</th><th>Setor</th><th>Status</th><th>Ações</th></tr></thead><tbody>
+              {users.map(item => <UserEditor key={item.id} user={item} setoresInternos={config?.setores_internos || []} onSave={onSaveUser} busy={busy} />)}
+            </tbody></table>
           </div>
         </section>
       )}
       {tab === 'setores' && (
-        <>
-          <section className="surface manager-section">
+          <section className="surface manager-section manager-sectors">
             <div className="section-heading">
               <div>
                 <h2>Setores do WhatsApp</h2>
                 <p>Os nomes aparecem no menu enviado ao cliente.</p>
               </div>
             </div>
-            <div className="sector-list">
-              {sectors.map((item) => (
-                <SectorEditor
-                  key={item.id}
-                  sector={item}
-                  users={users}
-                  onSave={onSaveSector}
-                  busy={busy}
-                />
-              ))}
+            <div className="table-wrap manager-list-table">
+              <table><thead><tr><th>Setor</th><th>Ícone</th><th>Distribuição</th><th>Ações</th></tr></thead><tbody>
+                {sectors.map(item => <SectorEditor key={item.id} sector={item} users={users} onSave={onSaveSector} busy={busy} />)}
+              </tbody></table>
             </div>
-          </section>
-          <section className="surface manager-section">
-            <div className="section-heading">
+            <div className="section-heading manager-subheading">
               <div>
                 <h2>Equipes internas</h2>
                 <p>
@@ -1402,8 +1350,10 @@ function Manager({
               className="create-user"
               onSubmit={async (event) => {
                 event.preventDefault()
-                if (await onCreateInternalSector({ nome: newInternalSector }))
+                if (await onCreateInternalSector({ nome: newInternalSector, icone: newInternalIcone })) {
                   setNewInternalSector('')
+                  setNewInternalIcone('equipe')
+                }
               }}
             >
               <input
@@ -1414,22 +1364,17 @@ function Manager({
                 maxLength="80"
                 required
               />
+              <SeletorIcone valor={newInternalIcone} onChange={setNewInternalIcone} />
               <button className="button button-primary" disabled={busy}>
                 Adicionar setor
               </button>
             </form>
-            <div className="sector-list">
-              {(config?.setores_internos || []).map((item) => (
-                <InternalSectorEditor
-                  key={item.id}
-                  sector={item}
-                  onSave={onSaveInternalSector}
-                  busy={busy}
-                />
-              ))}
+            <div className="table-wrap manager-list-table">
+              <table><thead><tr><th>Equipe</th><th>Ícone</th><th>Pessoas</th><th>Grupo</th><th>Ações</th></tr></thead><tbody>
+                {(config?.setores_internos || []).map(item => <InternalSectorEditor key={item.id} sector={item} membros={users.filter(pessoa => pessoa.ativo && pessoa.setor_interno_id === item.id).length} onSave={onSaveInternalSector} busy={busy} />)}
+              </tbody></table>
             </div>
           </section>
-        </>
       )}
     </div>
   )

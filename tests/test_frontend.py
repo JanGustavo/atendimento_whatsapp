@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from test_m1 import entrar
 
 
@@ -52,3 +54,16 @@ async def test_gestor_configura_icones_dos_setores(ambiente):
     assert config["setores"][0]["icone"] == "vendas"
     assert next(item for item in config["setores_internos"] if item["nome"] == "Pós-venda")["icone"] == "atendimento"
     assert next(item for item in (await client.get("/api/interno/setores")).json() if item["nome"] == "Pós-venda")["icone"] == "atendimento"
+
+
+async def test_flag_de_producao_bloqueia_simulador(ambiente, monkeypatch):
+    client, _ = ambiente
+    await entrar(client, "gestor@teste.local")
+    desativado = lambda: SimpleNamespace(enable_simulator=False)
+    monkeypatch.setattr("app.api.frontend.get_settings", desativado)
+    monkeypatch.setattr("app.api.gestor.get_settings", desativado)
+    monkeypatch.setattr("app.api.simulador.get_settings", desativado)
+    assert (await client.get("/api/gestor/config")).json()["simulador_ativo"] is False
+    assert (await client.get("/api/simulador")).status_code == 404
+    assert (await client.post("/api/simulador", data={"cliente": "cliente1", "texto": "oi"})).status_code == 404
+    assert (await client.post("/api/gestor/simulador", data={"ativo": "on"})).status_code == 404

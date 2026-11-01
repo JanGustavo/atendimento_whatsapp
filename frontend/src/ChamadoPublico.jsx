@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { fetchApi } from './api.js'
+import { requisitar as fetchApi } from './api.js'
 
 const token = new URLSearchParams(window.location.search).get('token') || ''
 

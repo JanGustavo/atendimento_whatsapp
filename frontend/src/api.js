@@ -1,42 +1,42 @@
 /** Ponto único para chamadas HTTP do painel e do formulário público. */
-export function fetchApi(path, options = {}) {
-  return fetch(path, { credentials: 'same-origin', ...options })
+export function requisitar(rota, opcoes = {}) {
+  return fetch(rota, { credentials: 'same-origin', ...opcoes })
 }
 
-export async function erroApi(response, fallback) {
-  let mensagem = fallback || `Não foi possível concluir (${response.status}).`
+export async function erroApi(resposta, padrao) {
+  let mensagem = padrao || `Não foi possível concluir (${resposta.status}).`
   try {
-    const dados = await response.json()
+    const dados = await resposta.json()
     if (typeof dados.detail === 'string') mensagem = dados.detail
   } catch {
     // Algumas respostas não têm corpo JSON.
   }
   const erro = new Error(mensagem)
-  erro.status = response.status
+  erro.status = resposta.status
   return erro
 }
 
-export async function getJSON(path) {
-  const response = await fetchApi(path)
-  if (!response.ok) {
-    const erro = new Error(response.status === 401
+export async function obterJSON(rota) {
+  const resposta = await requisitar(rota)
+  if (!resposta.ok) {
+    const erro = new Error(resposta.status === 401
       ? 'Sessão encerrada. Entre novamente.'
-      : `Falha ao carregar (${response.status}).`)
-    erro.status = response.status
+      : `Falha ao carregar (${resposta.status}).`)
+    erro.status = resposta.status
     throw erro
   }
-  return response.json()
+  return resposta.json()
 }
 
-export async function postForm(path, values) {
-  const body = new URLSearchParams()
-  Object.entries(values).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) body.set(key, String(value))
+export async function enviarFormulario(rota, valores) {
+  const corpo = new URLSearchParams()
+  Object.entries(valores).forEach(([chave, valor]) => {
+    if (valor !== undefined && valor !== null) corpo.set(chave, String(valor))
   })
-  const response = await fetchApi(path, {
+  const resposta = await requisitar(rota, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-    body,
+    body: corpo,
   })
-  if (!response.ok) throw await erroApi(response)
+  if (!resposta.ok) throw await erroApi(resposta)
 }

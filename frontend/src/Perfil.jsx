@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ModalImagem from './ModalImagem.jsx'
-import { fetchApi } from './api.js'
+import { requisitar as fetchApi } from './api.js'
 
 const FOTO_TIPOS_ACEITOS = ['image/png', 'image/jpeg', 'image/webp']
 const FOTO_TAMANHO_MAX_MB = 2

@@ -5,7 +5,7 @@ import Interno, { Icone, PapelParede, lerPapelParede } from './Interno.jsx'
 import Perfil from './Perfil.jsx'
 import ModalImagem from './ModalImagem.jsx'
 import { converterWebp } from './images.js'
-import { fetchApi, getJSON, postForm } from './api.js'
+import { requisitar as fetchApi, obterJSON as getJSON, enviarFormulario as postForm } from './api.js'
 
 const roleName = { gestor: 'Gestor', supervisor: 'Supervisor', colaborador: 'Colaborador' }
 const stageName = {

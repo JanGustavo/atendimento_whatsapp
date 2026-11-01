@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { messageDay, messageHour } from './dates.js'
 import { converterWebp } from './images.js'
 import ModalImagem from './ModalImagem.jsx'
-import { fetchApi } from './api.js'
+import { requisitar as fetchApi } from './api.js'
 
 const BASE = '/api/interno'
 const PAGINA = 50

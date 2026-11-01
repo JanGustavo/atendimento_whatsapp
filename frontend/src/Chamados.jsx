@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { fetchApi } from './api.js'
+import { requisitar as fetchApi } from './api.js'
 
 const NOMES_STATUS = { aberto: 'Aberto', em_atendimento: 'Em atendimento', fechado: 'Fechado' }
 const NOVO_COMPUTADOR_VAZIO = { nome: '', dono_id: '', grupo: 'empresa', mesh_node_id: '' }

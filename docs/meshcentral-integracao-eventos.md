@@ -36,6 +36,18 @@ Fontes upstream:
    O perfil **não publica** a interface diretamente na Internet; o
    mapeamento é local (127.0.0.1:18088). Configure HTTPS confiável,
    DNS e tunnel/proxy dedicado de modo compatível com os agentes.
+
+   Na instalação FortGiro, `mesh.jangustavo.me` usa uma rota publicada pelo
+   Cloudflare Tunnel para `https://meshcentral:443`, com `Origin Server Name`
+   igual a `mesh.jangustavo.me` e `CA Pool` em
+   `/meshcentral-certs/root-cert-public.crt`. O Compose monta esse certificado
+   público no `cloudflared` somente para leitura. A aplicação Cloudflare Access
+   desse host reutiliza a política de e-mails permitidos do painel. **Esta
+   proteção também bloqueia o MeshAgent**, que não faz login interativo no
+   Access. Antes de instalar agentes externos, definir e testar uma rota de
+   agente separada com autenticação apropriada; não criar uma regra de bypass
+   geral para todo o host. A disponibilidade da tela HTTPS não comprova que
+   o agente consegue se registrar.
 2. Na interface MeshCentral, crie grupo de dispositivos e instale o agente
    oficial a partir da opção de adicionar dispositivos, **com consentimento
    dos usuários envolvidos**. Confira que o nó está online e anote seu

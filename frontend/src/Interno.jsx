@@ -24,9 +24,27 @@ async function postar(url, init, mensagemPadrao) {
   throw new Error(typeof corpo.detail === 'string' ? corpo.detail : mensagemPadrao)
 }
 
+async function apagar(url) {
+  const resposta = await fetch(url, { method: 'DELETE', credentials: 'same-origin' })
+  if (resposta.ok) return
+  const corpo = await resposta.json().catch(() => ({}))
+  throw new Error(typeof corpo.detail === 'string' ? corpo.detail : 'Não foi possível apagar a mensagem.')
+}
+
+async function editar(url, texto) {
+  const resposta = await fetch(url, {
+    method: 'PATCH', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+    body: new URLSearchParams({ texto }),
+  })
+  if (resposta.ok) return
+  const corpo = await resposta.json().catch(() => ({}))
+  throw new Error(typeof corpo.detail === 'string' ? corpo.detail : 'Não foi possível editar a mensagem.')
+}
+
 function rotasDe(grupo, colega) {
-  if (grupo) return { mensagens: `grupos/${grupo.id}/mensagens`, imagens: `grupos/${grupo.id}/imagens` }
-  if (colega) return { mensagens: `mensagens/${colega.id}`, imagens: `mensagens/${colega.id}/imagem` }
+  if (grupo) return { mensagens: `grupos/${grupo.id}/mensagens`, imagens: `grupos/${grupo.id}/imagens`, audios: `grupos/${grupo.id}/audios`, apagar: id => `grupos/${grupo.id}/mensagens/${id}` }
+  if (colega) return { mensagens: `mensagens/${colega.id}`, imagens: `mensagens/${colega.id}/imagem`, audios: `mensagens/${colega.id}/audio`, apagar: id => `mensagens/${colega.id}/${id}` }
   return null
 }
 
@@ -37,9 +55,9 @@ const plural = (n, singular, pluralForma) => `${n} ${n === 1 ? singular : plural
 const proximos = (a, b) => { const dif = new Date(b) - new Date(a); return dif >= 0 && dif < JANELA_AGRUPAR_MS }
 
 function mesclar(atuais, novas) {
-  const ids = new Set(atuais.map(item => item.id))
-  const extras = novas.filter(item => !ids.has(item.id))
-  return extras.length ? [...atuais, ...extras].sort((a, b) => a.id - b.id) : atuais
+  const porId = new Map(atuais.map(item => [item.id, item]))
+  for (const item of novas) porId.set(item.id, item)
+  return [...porId.values()].sort((a, b) => a.id - b.id)
 }
 
 /* ───────────── ícones ───────────── */
@@ -50,12 +68,16 @@ const ICONES = {
   vendas: <path d="M3 4h8l10 10-7 7L4 11V4zM7.5 7.5h.01" />,
   equipe: <><circle cx="9" cy="8" r="3" /><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 5v1" /></>,
   clipe: <path d="m21 11.5-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
+  mic: <><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8" /></>,
   enviar: <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />,
   buscar: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
   voltar: <path d="m15 18-6-6 6-6" />,
   seta: <path d="m9 6 6 6-6 6" />,
   fechar: <path d="M6 6l12 12M18 6 6 18" />,
   conversa: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />,
+  opcoes: <path d="m7 10 5 5 5-5" />,
+  editar: <><path d="M4 20h4l11-11a2 2 0 0 0-4-4L4 16v4zM13 7l4 4" /></>,
+  apagar: <><path d="M4 7h16M10 4h4M6 7l1 13h10l1-13M10 11v6m4-6v6" /></>,
 }
 
 function Icone({ nome, tamanho = 20, className }) {
@@ -182,7 +204,10 @@ function useMensagens(caminho, onErro) {
     }
   }, [caminho, temAnteriores, onErro])
 
-  return { mensagens, temAnteriores, atualizar, carregarAnteriores }
+  const marcarApagada = id => setMensagens(atuais => atuais.map(item => item.id === id
+    ? { ...item, texto: '', imagem_url: null, audio_url: null, apagada: true }
+    : item))
+  return { mensagens, temAnteriores, atualizar, carregarAnteriores, marcarApagada }
 }
 
 /* ───────────── diretório (coluna esquerda) ───────────── */
@@ -313,8 +338,12 @@ function CabecalhoChat({ grupo, colega, onVoltar, onImagem }) {
   )
 }
 
-function ListaMensagens({ mensagens, meId, ehGrupo, temAnteriores, onAnteriores, onImagem }) {
+function ListaMensagens({ mensagens, meId, ehGrupo, temAnteriores, onAnteriores, onImagem, onApagar, onEditar }) {
   const area = useRef(null)
+  const [menuId, setMenuId] = useState(null)
+  const [editandoId, setEditandoId] = useState(null)
+  const [textoEditado, setTextoEditado] = useState('')
+  const [salvando, setSalvando] = useState(false)
   const pertoDoFim = useRef(true)
   const ultimoId = useRef(null)
   const ultima = mensagens.at(-1)
@@ -369,7 +398,17 @@ function ListaMensagens({ mensagens, meId, ehGrupo, temAnteriores, onAnteriores,
             <div className={`message-row${minha ? ' message-outgoing' : ''}${continua ? ' int-cont' : ''}`}>
               <div className={minha ? 'message-bubble message-bubble-outgoing' : 'message-bubble'}>
                 {!minha && ehGrupo && !continua && <div className="message-label">{mensagem.remetente_nome}</div>}
-                {mensagem.texto && <div className="message-text">{mensagem.texto}</div>}
+                {editandoId === mensagem.id ? <form className="int-edit-form" onSubmit={async evento => {
+                  evento.preventDefault()
+                  if (!textoEditado.trim() || salvando) return
+                  setSalvando(true)
+                  try { if (await onEditar(mensagem.id, textoEditado.trim())) setEditandoId(null) }
+                  finally { setSalvando(false) }
+                }}>
+                  <textarea value={textoEditado} onChange={evento => setTextoEditado(evento.target.value)} maxLength="4000" rows="3" aria-label="Editar mensagem" autoFocus />
+                  <div><button type="button" onClick={() => setEditandoId(null)} disabled={salvando}>Cancelar</button><button type="submit" disabled={salvando || !textoEditado.trim()}>Salvar</button></div>
+                </form> : mensagem.apagada ? <div className="message-text int-deleted">Mensagem apagada</div> : mensagem.texto && <div className="message-text">{mensagem.texto}</div>}
+                {mensagem.audio_url && <audio controls preload="metadata" src={mensagem.audio_url} aria-label="Áudio do chat interno" />}
                 {mensagem.imagem_url && (
                   <button
                     type="button"
@@ -386,7 +425,14 @@ function ListaMensagens({ mensagens, meId, ehGrupo, temAnteriores, onAnteriores,
                     />
                   </button>
                 )}
-                <time>{messageHour(mensagem.criada_em)}</time>
+                <time>{messageHour(mensagem.criada_em)}{mensagem.editada_em && ' · editada'}</time>
+                {minha && !mensagem.apagada && editandoId !== mensagem.id && <div className="int-message-options">
+                  <button type="button" className="int-message-menu-trigger" aria-label="Opções da mensagem" aria-expanded={menuId === mensagem.id} onClick={() => setMenuId(menuId === mensagem.id ? null : mensagem.id)}><Icone nome="opcoes" tamanho={16} /></button>
+                  {menuId === mensagem.id && <div className="int-message-menu">
+                    {!mensagem.imagem_url && !mensagem.audio_url && <button type="button" title="Editar mensagem" aria-label="Editar mensagem" onClick={() => { setEditandoId(mensagem.id); setTextoEditado(mensagem.texto); setMenuId(null) }}><Icone nome="editar" tamanho={16} /></button>}
+                    <button type="button" title="Apagar mensagem" aria-label="Apagar mensagem" onClick={() => { setMenuId(null); if (window.confirm('Apagar esta mensagem para todos no chat interno?')) onApagar(mensagem.id) }}><Icone nome="apagar" tamanho={16} /></button>
+                  </div>}
+                </div>}
               </div>
             </div>
           </Fragment>
@@ -401,8 +447,26 @@ function Composer({ rotas, destino, onEnviado, onErro }) {
   const [imagem, setImagem] = useState(null)
   const [previa, setPrevia] = useState(null)
   const [enviando, setEnviando] = useState(false)
+  const [gravando, setGravando] = useState(false)
+  const [segundos, setSegundos] = useState(0)
   const campo = useRef(null)
   const arquivo = useRef(null)
+  const audioArquivo = useRef(null)
+  const gravador = useRef(null)
+  const cancelarAudio = useRef(false)
+
+  useEffect(() => {
+    if (!gravando) return undefined
+    const id = window.setInterval(() => setSegundos(valor => valor + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [gravando])
+
+  useEffect(() => () => {
+    if (gravador.current?.state === 'recording') {
+      cancelarAudio.current = true
+      gravador.current.stop()
+    }
+  }, [])
 
   useEffect(() => {
     if (!imagem) { setPrevia(null); return }
@@ -467,8 +531,50 @@ function Composer({ rotas, destino, onEnviado, onErro }) {
     if (evento.key === 'Enter' && !evento.shiftKey && !evento.nativeEvent.isComposing) enviar(evento)
   }
 
+  async function enviarAudio(blob) {
+    if (enviando || blob.size > 16 * 1024 * 1024) {
+      onErro('Escolha um áudio de até 16 MB.')
+      return
+    }
+    setEnviando(true); onErro('')
+    try {
+      await postar(`${BASE}/${rotas.audios}`, { headers: { 'Content-Type': blob.type || 'audio/mpeg' }, body: blob }, 'Não foi possível enviar o áudio.')
+      await onEnviado()
+    } catch (falha) { onErro(falha.message) }
+    finally { setEnviando(false) }
+  }
+
+  async function alternarGravacao() {
+    if (gravador.current) { gravador.current.stop(); return }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      onErro('Microfone indisponível neste navegador. Anexe um arquivo de áudio.')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const tipo = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'].find(item => MediaRecorder.isTypeSupported(item))
+      if (!tipo) { stream.getTracks().forEach(track => track.stop()); onErro('Formato de gravação não suportado.'); return }
+      const recorder = new MediaRecorder(stream, { mimeType: tipo })
+      const partes = []
+      recorder.ondataavailable = evento => { if (evento.data.size) partes.push(evento.data) }
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop())
+        gravador.current = null
+        setGravando(false)
+        if (cancelarAudio.current) { cancelarAudio.current = false; return }
+        if (partes.length) await enviarAudio(new Blob(partes, { type: tipo.startsWith('audio/ogg') ? 'audio/ogg' : 'audio/webm' }))
+      }
+      cancelarAudio.current = false
+      gravador.current = recorder
+      setSegundos(0)
+      recorder.start()
+      setGravando(true)
+    } catch { onErro('Não foi possível acessar o microfone. Confira a permissão do navegador.') }
+  }
+
   return (
     <div className="chat-composer">
+      {gravando && <div className="gravacao-status" role="status"><span className="gravacao-ponto" />Gravando {String(Math.floor(segundos / 60)).padStart(2, '0')}:{String(segundos % 60).padStart(2, '0')}<button type="button" onClick={() => { cancelarAudio.current = true; gravador.current?.stop() }}>Cancelar</button><span>Toque no microfone verde para enviar.</span></div>}
       {imagem && (
         <div className="int-attachment">
           {previa && <img src={previa} alt="" />}
@@ -478,14 +584,16 @@ function Composer({ rotas, destino, onEnviado, onErro }) {
       )}
       <form onSubmit={enviar}>
         <input ref={arquivo} type="file" accept="image/*" hidden onChange={e => escolherImagem(e.target.files?.[0])} />
+        <input ref={audioArquivo} type="file" accept=".mp3,.ogg,audio/mpeg,audio/ogg" hidden onChange={e => { const escolhido = e.target.files?.[0]; e.target.value = ''; if (escolhido) enviarAudio(escolhido) }} />
         <button type="button" className="int-icon-btn" onClick={() => arquivo.current?.click()} disabled={enviando} aria-label="Anexar imagem" title="Anexar imagem"><Icone nome="clipe" /></button>
+        <button type="button" className="int-icon-btn" onClick={() => audioArquivo.current?.click()} disabled={enviando || gravando} aria-label="Anexar áudio" title="Anexar áudio">♪</button>
         <textarea ref={campo} rows="1" value={texto} maxLength="4000" placeholder={`Mensagem para ${destino}`} aria-label="Mensagem"
-          onChange={e => setTexto(e.target.value)} onKeyDown={aoTeclar} onPaste={aoColar} />
-        <button type="submit" className="button button-primary" disabled={enviando || (!texto.trim() && !imagem)}>
+          onChange={e => setTexto(e.target.value)} onKeyDown={aoTeclar} onPaste={aoColar} disabled={gravando} />
+        {texto.trim() || imagem ? <button type="submit" className="button button-primary" disabled={enviando || gravando}>
           <Icone nome="enviar" tamanho={16} /><span>{enviando ? 'Enviando…' : 'Enviar'}</span>
-        </button>
+        </button> : <button type="button" className={`atendimento-mic${gravando ? ' gravando-audio' : ''}`} disabled={enviando} onClick={alternarGravacao} aria-label={gravando ? 'Parar e enviar gravação' : 'Gravar áudio'} title={gravando ? 'Parar e enviar gravação' : 'Gravar áudio'}><Icone nome="mic" /></button>}
       </form>
-      <small className="composer-hint">Enter envia · Shift+Enter quebra a linha · imagens até 12 MB, enviadas em WebP (máx. 2 MB)</small>
+      <small className="composer-hint">Enter envia · Shift+Enter quebra a linha · imagens até 12 MB · áudio até 16 MB</small>
     </div>
   )
 }
@@ -493,7 +601,7 @@ function Composer({ rotas, destino, onEnviado, onErro }) {
 /* ───────────── conversa ativa ───────────── */
 
 function Conversa({ rotas, grupo, colega, me, onVoltar, onImagem, onErro, atualizarConversas, onOpen }) {
-  const { mensagens, temAnteriores, atualizar, carregarAnteriores } = useMensagens(rotas.mensagens, onErro)
+  const { mensagens, temAnteriores, atualizar, carregarAnteriores, marcarApagada } = useMensagens(rotas.mensagens, onErro)
   const ultimaMensagemId = mensagens.at(-1)?.id
 
   // marca como lida enquanto a conversa está aberta
@@ -520,6 +628,22 @@ function Conversa({ rotas, grupo, colega, me, onVoltar, onImagem, onErro, atuali
         temAnteriores={temAnteriores}
         onAnteriores={carregarAnteriores}
         onImagem={onImagem}
+        onApagar={async id => {
+          try {
+            await apagar(`${BASE}/${rotas.apagar(id)}`)
+            marcarApagada(id)
+            await atualizar(true)
+            atualizarConversas()
+          } catch (falha) { onErro(falha.message) }
+        }}
+        onEditar={async (id, texto) => {
+          try {
+            await editar(`${BASE}/${rotas.apagar(id)}`, texto)
+            await atualizar(true)
+            atualizarConversas()
+            return true
+          } catch (falha) { onErro(falha.message); return false }
+        }}
       />
       <Composer
         rotas={rotas}

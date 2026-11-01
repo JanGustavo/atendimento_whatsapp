@@ -55,7 +55,7 @@ Em 29/10/2026, o painel HTTPS foi publicado em `painel.jangustavo.me` pelo túne
 
 Para testar sem Internet, conecte computador e celular à mesma rede local (o hotspot do celular serve mesmo sem dados móveis), descubra o novo IP local do computador e abra `http://<IP>:18087/painel`. O chat interno usa apenas a rede local e o SQLite. O webhook e o envio pela Cloud API da Meta dependem de Internet; sem ela, mensagens reais de WhatsApp não chegam nem saem.
 
-Os setores internos são independentes dos quatro setores do menu WhatsApp. O gestor pode criar/renomear qualquer setor interno e transferir usuários entre eles. O grupo aparece para membros ativos quando o setor tem pelo menos dois membros ativos; o acesso ao histórico do grupo segue o setor atual do usuário. Imagens nesta etapa funcionam apenas no chat interno. O navegador converte para WebP, sem dependência Python adicional; uploads inválidos e arquivos acima de 2 MB são rejeitados. O arquivo fica no volume, enquanto o banco guarda a chave privada. O chat WhatsApp continua somente texto até uma etapa própria de mídia.
+Os setores internos são independentes dos quatro setores do menu WhatsApp. O gestor pode criar/renomear qualquer setor interno e transferir usuários entre eles. O grupo aparece para membros ativos quando o setor tem pelo menos dois membros ativos; o acesso ao histórico do grupo segue o setor atual do usuário. O navegador converte imagens para WebP; uploads inválidos e arquivos acima de 2 MB são rejeitados. O arquivo fica no volume, enquanto o banco guarda a chave privada.
 
 ## Conversas internas, presença e fotos (29/10/2026)
 
@@ -77,3 +77,14 @@ Em 30/10/2026, um novo webhook real confirmou o nome de perfil `Jan` para a conv
 - A API `/api/atendimentos/{id}/mensagens` aceita corpo `image/webp` com a legenda opcional em parâmetro `texto`, armazenando o WebP no volume privado `/data/media` e a chave em `mensagens.imagem_chave`. O provider WhatsApp envia a foto e a legenda correspondente.
 - As imagens das mensagens ficam disponíveis em `/api/atendimentos/{conversa_id}/mensagens/{mensagem_id}/imagem`, respeitando a visibilidade e o isolamento de conversa do usuário autenticado.
 - No chat interno, `/api/interno/mensagens/{colega_id}/imagem` e `/api/interno/grupos/{setor_id}/imagens` agora aceitam o texto da mensagem via parâmetro `texto`, associando a imagem e a legenda a uma única mensagem no banco e na tela.
+
+## Edição e descarte de mensagens WhatsApp (31/10/2026)
+
+A Cloud API oficial da Meta oferece envio, recibos e status, mas não uma operação para editar ou apagar uma mensagem já enviada no WhatsApp. O painel permite **Editar** e **Descartar** somente mensagens humanas do próprio autor com status `falhou` e sem ID retornado pela Meta. A edição altera o texto que será usado no próximo reenvio; o descarte remove o registro local e a imagem associada, se houver. Ambos exigem que a conversa continue aberta e atribuída ao usuário, ou acesso de gestor. Mensagens enviadas, entregues e lidas ficam imutáveis no histórico; uma correção ao cliente deve ser enviada como nova mensagem. Em falhas de rede, a falta de confirmação **não prova** que a Meta deixou de entregar; o atendente deve conferir antes de reenviar ou descartar. O botão nunca sugere uma exclusão que não ocorreu no aparelho do cliente.
+
+## Contatos, áudio e arquivamento (31/10/2026)
+
+- O painel permite anexar MP3/OGG Opus ou gravar pelo microfone. Chrome grava WebM; FFmpeg autorizado pelo usuário converte a gravação para OGG Opus no servidor. O arquivo final fica em `/data/media`, com chave no SQLite. O endpoint de leitura exige login e acesso à conversa. Gravar pelo microfone exige contexto seguro HTTPS ou `localhost`.
+- Arquivar esconde a conversa da lista principal sem encerrar atendimento nem apagar histórico. A aba **Arquivadas** permite reabrir a visualização. Nova mensagem do cliente desarquiva automaticamente a conversa aberta.
+- **Novo contato** guarda nome, número e confirmação de consentimento. No modo Meta, sem `META_TEMPLATE_NOME` aprovado, ele fica salvo sem mensagem enviada. O botão **Enviar template** aparece depois de configurar `META_TEMPLATE_NOME` e `META_TEMPLATE_IDIOMA`. A API bloqueia texto, imagem e áudio fora da janela de 24 horas após a última mensagem recebida do cliente. A aprovação do template e o consentimento real são responsabilidades da operação; o painel registra a confirmação feita pelo atendente.
+- Ligações de WhatsApp ficam fora desta bateria.

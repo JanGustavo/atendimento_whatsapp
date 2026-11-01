@@ -1,5 +1,7 @@
 """Leituras JSON para o painel React. As mutações reutilizam as rotas existentes."""
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import and_, func, or_, select
@@ -34,6 +36,8 @@ def conversa_json(conversa: Conversa) -> dict:
         "nome_contato": conversa.nome_contato,
         "foto_url": f"/api/atendimentos/{conversa.id}/foto?v={conversa.foto_chave}" if conversa.foto_chave else None,
         "status": conversa.status,
+        "arquivada": conversa.arquivada_em is not None,
+        "contato_optin": conversa.contato_optin_em is not None,
         "etapa": conversa.etapa,
         "setor_id": conversa.setor_id,
         "setor_nome": conversa.setor.nome if conversa.setor else None,
@@ -60,6 +64,10 @@ def mensagem_json(mensagem: Mensagem) -> dict:
             if mensagem.imagem_chave
             else None
         ),
+        "audio_url": (
+            f"/api/atendimentos/{mensagem.conversa_id}/mensagens/{mensagem.id}/audio"
+            if mensagem.audio_chave else None
+        ),
         "autor_id": mensagem.autor_id,
         "criada_em": mensagem.criada_em.isoformat() if mensagem.criada_em else None,
     }
@@ -73,6 +81,8 @@ async def me(user: UsuarioAtual = Depends(get_current_user), db: AsyncSession = 
         "nome": user.nome,
         "email": usuario.email,
         "role": user.role,
+        "whatsapp_provider": get_settings().whatsapp_provider,
+        "meta_template_disponivel": bool(get_settings().meta_template_nome),
         "foto_url": foto_url(usuario),
         "presenca_intervalo_segundos": get_settings().presenca_intervalo_segundos,
     }
@@ -237,6 +247,9 @@ async def detalhe_conversa(
         else None
     )
     ultima_cliente_id = max((item.id for item in mensagens if item.origem == "cliente"), default=0)
+    ultima_cliente_em = max(
+        (item.criada_em for item in mensagens if item.origem == "cliente"), default=None
+    )
     vendedores = (
         (
             await db.execute(
@@ -279,6 +292,10 @@ async def detalhe_conversa(
         "conversa": conversa_json(conversa),
         "destinos": destinos,
         "mensagens": [mensagem_json(item) for item in mensagens],
+        "janela_texto_aberta": (
+            get_settings().whatsapp_provider != "meta"
+            or (ultima_cliente_em is not None and now() - ultima_cliente_em <= timedelta(hours=24))
+        ),
         "visualizada_pelo_atendente_em": (
             leitura_atendente.lida_em.isoformat()
             if leitura_atendente and leitura_atendente.ultima_mensagem_id >= ultima_cliente_id
@@ -376,4 +393,7 @@ async def dados_simulador(
 
 @router.get("/gestor/whatsapp-status")
 async def whatsapp_status(user: UsuarioAtual = Depends(somente_gestor)):
+    config = get_settings()
+    if config.whatsapp_provider == "meta" and not config.meta_app_secret:
+        return {"status": "webhook sem chave"}
     return {"status": await provider_atual().status()}

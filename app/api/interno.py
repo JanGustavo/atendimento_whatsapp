@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.requests import Request
 from fastapi.responses import FileResponse
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +14,7 @@ from app.api.deps import UsuarioAtual, get_current_user
 from app.core.database import get_db
 from app.core.utils import now
 from app.models import LeituraInterna, MensagemGrupo, MensagemInterna, SetorInterno, Usuario
-from app.services.media import caminho_media, foto_url, guardar_webp
+from app.services.media import caminho_media, foto_url, guardar_audio, guardar_webp
 from app.services.presenca import esta_conectado
 
 router = APIRouter(prefix="/api/interno")
@@ -134,7 +134,7 @@ async def listar_conversas(db: AsyncSession = Depends(get_db),
             "tipo": "direta", "alvo_id": colega.id, "nome": colega.nome,
             "foto_url": foto_url(colega), "online": esta_conectado(colega),
             "ultimo_remetente": "Você" if ultima.remetente_id == user.user_id else colega.nome,
-            "ultima_previa": ultima.texto[:120] if ultima.texto else "Imagem",
+            "ultima_previa": "Mensagem apagada" if ultima.apagada_em else ultima.texto[:120] if ultima.texto else "Áudio" if ultima.audio_chave else "Imagem",
             "ultima_em": ultima.criada_em.isoformat(),
             "nao_lidas": nao_lidas_diretas.get(colega.id, 0),
         })
@@ -146,7 +146,7 @@ async def listar_conversas(db: AsyncSession = Depends(get_db),
             "foto_url": None, "online": None,
             "ultimo_remetente": ("Você" if ultima.remetente_id == user.user_id else remetente.nome)
                                 if ultima and remetente else None,
-            "ultima_previa": (ultima.texto[:120] if ultima.texto else "Imagem") if ultima else None,
+            "ultima_previa": ("Mensagem apagada" if ultima.apagada_em else ultima.texto[:120] if ultima.texto else "Áudio" if ultima.audio_chave else "Imagem") if ultima else None,
             "ultima_em": ultima.criada_em.isoformat() if ultima else None,
             "nao_lidas": nao_lidas_grupos.get(setor.id, 0),
         })
@@ -212,6 +212,9 @@ async def mensagens_grupo(
             "imagem_url": f"/api/interno/imagens/{item.imagem_chave}"
             if item.imagem_chave
             else None,
+            "audio_url": f"/api/interno/audios/{item.audio_chave}" if item.audio_chave else None,
+            "apagada": item.apagada_em is not None,
+            "editada_em": item.editada_em.isoformat() if item.editada_em else None,
             "criada_em": item.criada_em.isoformat(),
         }
         for item, nome in reversed(linhas)
@@ -272,6 +275,9 @@ async def mensagens(
             "imagem_url": f"/api/interno/imagens/{item.imagem_chave}"
             if item.imagem_chave
             else None,
+            "audio_url": f"/api/interno/audios/{item.audio_chave}" if item.audio_chave else None,
+            "apagada": item.apagada_em is not None,
+            "editada_em": item.editada_em.isoformat() if item.editada_em else None,
             "criada_em": item.criada_em.isoformat(),
         }
         for item in reversed(registros)
@@ -355,6 +361,171 @@ async def enviar_imagem_grupo(
     except Exception:
         arquivo.unlink(missing_ok=True)
         raise
+
+
+@router.post("/mensagens/{colega_id}/audio")
+async def enviar_audio_direto(
+    colega_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    colega = await db.get(Usuario, colega_id)
+    if colega is None or not colega.ativo or colega.id == user.user_id:
+        raise HTTPException(status_code=404, detail="Colega indisponível")
+    chave, arquivo = await guardar_audio(request)
+    try:
+        mensagem = MensagemInterna(
+            remetente_id=user.user_id, destinatario_id=colega_id,
+            texto="", audio_chave=chave, criada_em=now(),
+        )
+        db.add(mensagem)
+        await db.commit()
+        return {"id": mensagem.id}
+    except Exception:
+        arquivo.unlink(missing_ok=True)
+        raise
+
+
+@router.post("/grupos/{setor_id}/audios")
+async def enviar_audio_grupo(
+    setor_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    await grupo_visivel(db, setor_id, user)
+    chave, arquivo = await guardar_audio(request)
+    try:
+        mensagem = MensagemGrupo(
+            setor_id=setor_id, remetente_id=user.user_id,
+            texto="", audio_chave=chave, criada_em=now(),
+        )
+        db.add(mensagem)
+        await db.commit()
+        return {"id": mensagem.id}
+    except Exception:
+        arquivo.unlink(missing_ok=True)
+        raise
+
+
+@router.patch("/mensagens/{colega_id}/{mensagem_id}")
+async def editar_mensagem_direta(
+    colega_id: int, mensagem_id: int, request: Request,
+    db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(get_current_user),
+):
+    texto = (await form(request)).get("texto", "").strip()
+    if not 1 <= len(texto) <= 4000:
+        raise HTTPException(status_code=422, detail="Mensagem inválida")
+    resultado = await db.execute(update(MensagemInterna).where(
+        MensagemInterna.id == mensagem_id,
+        MensagemInterna.remetente_id == user.user_id,
+        MensagemInterna.destinatario_id == colega_id,
+        MensagemInterna.apagada_em.is_(None),
+        MensagemInterna.imagem_chave.is_(None),
+        MensagemInterna.audio_chave.is_(None),
+    ).values(texto=texto, editada_em=now()))
+    if resultado.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Mensagem de texto não encontrada")
+    await db.commit()
+    return {"id": mensagem_id, "texto": texto, "editada": True}
+
+
+@router.patch("/grupos/{setor_id}/mensagens/{mensagem_id}")
+async def editar_mensagem_grupo(
+    setor_id: int, mensagem_id: int, request: Request,
+    db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(get_current_user),
+):
+    await grupo_visivel(db, setor_id, user)
+    texto = (await form(request)).get("texto", "").strip()
+    if not 1 <= len(texto) <= 4000:
+        raise HTTPException(status_code=422, detail="Mensagem inválida")
+    resultado = await db.execute(update(MensagemGrupo).where(
+        MensagemGrupo.id == mensagem_id,
+        MensagemGrupo.setor_id == setor_id,
+        MensagemGrupo.remetente_id == user.user_id,
+        MensagemGrupo.apagada_em.is_(None),
+        MensagemGrupo.imagem_chave.is_(None),
+        MensagemGrupo.audio_chave.is_(None),
+    ).values(texto=texto, editada_em=now()))
+    if resultado.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Mensagem de texto não encontrada")
+    await db.commit()
+    return {"id": mensagem_id, "texto": texto, "editada": True}
+
+
+@router.delete("/mensagens/{colega_id}/{mensagem_id}")
+async def apagar_mensagem_direta(
+    colega_id: int, mensagem_id: int, db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    mensagem = (await db.execute(select(MensagemInterna).where(
+        MensagemInterna.id == mensagem_id,
+        MensagemInterna.remetente_id == user.user_id,
+        MensagemInterna.destinatario_id == colega_id,
+        MensagemInterna.apagada_em.is_(None),
+    ))).scalar_one_or_none()
+    if mensagem is None:
+        raise HTTPException(status_code=404, detail="Mensagem não encontrada")
+    arquivos = [chave for chave in (mensagem.imagem_chave, mensagem.audio_chave) if chave]
+    await db.execute(update(MensagemInterna).where(
+        MensagemInterna.id == mensagem_id, MensagemInterna.apagada_em.is_(None),
+    ).values(texto="", imagem_chave=None, audio_chave=None, apagada_em=now()))
+    await db.commit()
+    for chave in arquivos:
+        caminho_media(chave).unlink(missing_ok=True)
+    return {"apagada": True}
+
+
+@router.delete("/grupos/{setor_id}/mensagens/{mensagem_id}")
+async def apagar_mensagem_grupo(
+    setor_id: int, mensagem_id: int, db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    await grupo_visivel(db, setor_id, user)
+    mensagem = (await db.execute(select(MensagemGrupo).where(
+        MensagemGrupo.id == mensagem_id,
+        MensagemGrupo.setor_id == setor_id,
+        MensagemGrupo.remetente_id == user.user_id,
+        MensagemGrupo.apagada_em.is_(None),
+    ))).scalar_one_or_none()
+    if mensagem is None:
+        raise HTTPException(status_code=404, detail="Mensagem não encontrada")
+    arquivos = [chave for chave in (mensagem.imagem_chave, mensagem.audio_chave) if chave]
+    await db.execute(update(MensagemGrupo).where(
+        MensagemGrupo.id == mensagem_id, MensagemGrupo.apagada_em.is_(None),
+    ).values(texto="", imagem_chave=None, audio_chave=None, apagada_em=now()))
+    await db.commit()
+    for chave in arquivos:
+        caminho_media(chave).unlink(missing_ok=True)
+    return {"apagada": True}
+
+
+@router.get("/audios/{chave}")
+async def ler_audio(
+    chave: str, db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(get_current_user),
+):
+    if not re.fullmatch(r"[0-9a-f]{32}\.(mp3|ogg)", chave):
+        raise HTTPException(status_code=404, detail="Áudio não encontrado")
+    direta = (await db.execute(select(MensagemInterna.id).where(
+        MensagemInterna.audio_chave == chave,
+        or_(MensagemInterna.remetente_id == user.user_id,
+            MensagemInterna.destinatario_id == user.user_id),
+    ))).scalar_one_or_none()
+    if direta is None:
+        atual = await db.get(Usuario, user.user_id)
+        grupo = (await db.execute(select(MensagemGrupo.id).where(
+            MensagemGrupo.audio_chave == chave,
+            *([] if user.role == "gestor" else [MensagemGrupo.setor_id == atual.setor_interno_id]),
+        ))).scalar_one_or_none()
+        if grupo is None:
+            raise HTTPException(status_code=404, detail="Áudio não encontrado")
+    arquivo = caminho_media(chave)
+    if not arquivo.is_file():
+        raise HTTPException(status_code=404, detail="Áudio não encontrado")
+    return FileResponse(
+        arquivo, media_type="audio/mpeg" if chave.endswith(".mp3") else "audio/ogg",
+        headers={"Cache-Control": "private, no-store", "Accept-Ranges": "bytes"},
+    )
 
 
 @router.get("/imagens/{chave}")

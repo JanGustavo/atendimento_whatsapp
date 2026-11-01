@@ -57,6 +57,9 @@ class MensagemInterna(Base):
     destinatario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
     texto: Mapped[str] = mapped_column(Text, nullable=False)
     imagem_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
+    audio_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
+    apagada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    editada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     criada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
 
@@ -67,6 +70,9 @@ class MensagemGrupo(Base):
     remetente_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
     texto: Mapped[str] = mapped_column(Text, nullable=False)
     imagem_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
+    audio_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
+    apagada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    editada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     criada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
 
 
@@ -110,13 +116,16 @@ class Conversa(Base):
     etapa: Mapped[str] = mapped_column(String(30), default="menu_setor", nullable=False)
     criada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
     primeira_resposta_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    arquivada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    arquivada_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    contato_optin_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timer_inicio_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timer_prazo_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timer_aviso_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timer_extensoes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     tentativas_timer: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     setor: Mapped[Setor | None] = relationship()
-    atribuido: Mapped[Usuario | None] = relationship()
+    atribuido: Mapped[Usuario | None] = relationship(foreign_keys=[atribuido_id])
 
 
 class Mensagem(Base):
@@ -127,6 +136,7 @@ class Mensagem(Base):
     origem: Mapped[str] = mapped_column(String(20))
     texto: Mapped[str] = mapped_column(Text)
     imagem_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
+    audio_chave: Mapped[str | None] = mapped_column(String(40), unique=True)
     provider_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     envio_status: Mapped[str | None] = mapped_column(String(20))
     lida_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

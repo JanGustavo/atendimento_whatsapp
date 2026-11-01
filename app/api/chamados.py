@@ -15,7 +15,7 @@ from app.core.database import get_db
 from app.core.utils import now as agora
 from app.models import AcessoRemoto, Chamado, Computador, SessaoMeshCentral, Usuario
 from app.services.meshcentral_events import monitor_conectado
-from app.services.remoto import provider_remoto_atual
+from app.services.remoto import RemotoMeshCentral, provider_remoto_atual
 
 router = APIRouter()
 
@@ -496,8 +496,12 @@ async def auditar_sessoes_remotas(
         .outerjoin(Chamado, AcessoRemoto.chamado_id == Chamado.id)
         .order_by(SessaoMeshCentral.id.desc()).limit(200)
     )).all()
+    config = get_settings()
+    mesh_url = RemotoMeshCentral(config.meshcentral_url).url if config.meshcentral_url else None
     return {
         "monitor_conectado": monitor_conectado(),
+        "meshcentral_url": mesh_url,
+        "remoto_provider": config.remoto_provider,
         "sessoes": [serializar_sessao(s, nome, chamado_id, motivo)
             for s, nome, chamado_id, motivo in registros],
     }

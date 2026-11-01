@@ -1,4 +1,4 @@
-"""WhatsApp Cloud API oficial da Meta; apenas mensagens de texto saem daqui."""
+"""WhatsApp Cloud API oficial da Meta."""
 
 import httpx
 
@@ -128,6 +128,71 @@ class MetaProvider:
                 raise MetaEnvioRecusado(_erro_envio(resposta))
             dados = resposta.json()
             identidade = (dados.get("messages") or [{}])[0].get("id")
+            if not isinstance(identidade, str) or not identidade:
+                raise ValueError("Meta não retornou o ID da mensagem")
+            return identidade
+
+    async def enviar_audio(self, numero: str, audio_chave: str) -> str:
+        numero = "".join(c for c in numero if c.isdigit())
+        if not numero:
+            raise ValueError("Número inválido")
+        if numero.startswith("55") and len(numero) == 12 and numero[4] in "6789":
+            numero = numero[:4] + "9" + numero[4:]
+        arquivo = caminho_media(audio_chave)
+        if not arquivo.is_file() or arquivo.suffix not in {".mp3", ".ogg"}:
+            raise ValueError("Áudio não encontrado")
+        # A Cloud API não aceita o MIME genérico audio/ogg para voz.
+        tipo = "audio/mpeg" if arquivo.suffix == ".mp3" else "audio/ogg; codecs=opus"
+        async with httpx.AsyncClient(timeout=30) as client:
+            upload = await client.post(
+                f"{self._url}/media",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                data={"messaging_product": "whatsapp", "type": tipo},
+                files={"file": (audio_chave, arquivo.read_bytes(), tipo)},
+            )
+            if _token_expirado(upload):
+                raise MetaTokenExpirado("Token de acesso da Meta expirou")
+            if upload.is_error:
+                raise MetaEnvioRecusado(_erro_envio(upload))
+            media_id = (upload.json() or {}).get("id")
+            if not isinstance(media_id, str) or not media_id:
+                raise ValueError("Meta não retornou o ID do áudio")
+            audio = {"id": media_id}
+            if arquivo.suffix == ".ogg":
+                audio["voice"] = True
+            resposta = await client.post(
+                f"{self._url}/messages",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                json={"messaging_product": "whatsapp", "recipient_type": "individual", "to": numero,
+                      "type": "audio", "audio": audio},
+            )
+            if _token_expirado(resposta):
+                raise MetaTokenExpirado("Token de acesso da Meta expirou")
+            if resposta.is_error:
+                raise MetaEnvioRecusado(_erro_envio(resposta))
+            identidade = (resposta.json().get("messages") or [{}])[0].get("id")
+            if not isinstance(identidade, str) or not identidade:
+                raise ValueError("Meta não retornou o ID da mensagem")
+            return identidade
+
+    async def enviar_template(self, numero: str, nome: str, idioma: str) -> str:
+        numero = "".join(c for c in numero if c.isdigit())
+        if not numero or not nome or not idioma:
+            raise ValueError("Número, nome do template e idioma são obrigatórios")
+        if numero.startswith("55") and len(numero) == 12 and numero[4] in "6789":
+            numero = numero[:4] + "9" + numero[4:]
+        async with httpx.AsyncClient(timeout=10) as client:
+            resposta = await client.post(
+                f"{self._url}/messages",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                json={"messaging_product": "whatsapp", "recipient_type": "individual", "to": numero,
+                      "type": "template", "template": {"name": nome, "language": {"code": idioma}}},
+            )
+            if _token_expirado(resposta):
+                raise MetaTokenExpirado("Token de acesso da Meta expirou")
+            if resposta.is_error:
+                raise MetaEnvioRecusado(_erro_envio(resposta))
+            identidade = (resposta.json().get("messages") or [{}])[0].get("id")
             if not isinstance(identidade, str) or not identidade:
                 raise ValueError("Meta não retornou o ID da mensagem")
             return identidade

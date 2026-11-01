@@ -168,6 +168,7 @@ function Icon({ name, size = 19 }) {
     ),
     arrow: <path d="m5 12 14 0m-6-6 6 6-6 6" />,
     clip: <path d="m21.5 11.5-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
+    mic: <><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8" /></>,
     fechar: <path d="M18 6 6 18M6 6l12 12" />,
     ticket: (
       <>
@@ -270,8 +271,10 @@ function Login({ onLogin, busy, error }) {
   )
 }
 
-function MessageBubbles({ messages, simulator = false, onRetry, onImagem, currentUserId, busy = false }) {
+function MessageBubbles({ messages, simulator = false, onRetry, onEdit, onDiscard, onImagem, currentUserId, busy = false }) {
   const bottom = React.useRef(null)
+  const [editId, setEditId] = useState(null)
+  const [editText, setEditText] = useState('')
   const colado = useRef(true)
   const montado = useRef(false)
   const total = useRef(0)
@@ -338,7 +341,19 @@ function MessageBubbles({ messages, simulator = false, onRetry, onImagem, curren
                     />
                   </button>
                 )}
-                {message.texto && <div className="message-text">{message.texto}</div>}
+                {message.audio_url && <audio controls preload="metadata" src={message.audio_url} aria-label="Áudio da conversa" />}
+                {editId === message.id ? (
+                  <form className="failed-message-editor" onSubmit={async (event) => {
+                    event.preventDefault()
+                    if (await onEdit(message.id, editText)) setEditId(null)
+                  }}>
+                    <textarea aria-label="Editar mensagem com falha" value={editText} onChange={(event) => setEditText(event.target.value)} maxLength={4000} rows={3} required={!message.imagem_url} />
+                    <div className="failed-message-actions">
+                      <button type="submit" disabled={busy}>Salvar</button>
+                      <button type="button" disabled={busy} onClick={() => setEditId(null)}>Cancelar</button>
+                    </div>
+                  </form>
+                ) : message.texto && <div className="message-text">{message.texto}</div>}
                 <time>
                   {time(message.criada_em)}
                   {!simulator && message.origem !== 'cliente' && (
@@ -362,14 +377,14 @@ function MessageBubbles({ messages, simulator = false, onRetry, onImagem, curren
                   message.origem === 'humano' &&
                   message.envio_status === 'falhou' &&
                   message.autor_id === currentUserId &&
-                  onRetry && (
-                    <button
-                      className="retry-message"
-                      disabled={busy}
-                      onClick={() => onRetry(message.id)}
-                    >
-                      Reenviar
-                    </button>
+                  onRetry && editId !== message.id && (
+                    <div className="failed-message-actions">
+                      <button className="retry-message" disabled={busy} onClick={() => onRetry(message.id)}>Reenviar</button>
+                      {!message.audio_url && !message.texto?.startsWith('Template: ') && <button className="retry-message" disabled={busy} onClick={() => { setEditId(message.id); setEditText(message.texto) }}>Editar</button>}
+                      <button className="retry-message" disabled={busy} onClick={() => {
+                        if (window.confirm('Descartar o registro local desta mensagem com falha? Em falhas de rede, confira o WhatsApp do cliente: ela pode ter sido entregue.')) onDiscard(message.id)
+                      }}>Descartar</button>
+                    </div>
                   )}
               </div>
             </div>
@@ -399,6 +414,7 @@ const atendimentoFiltros = [
   { id: 'todas', nome: 'Todas' },
   { id: 'nao_lidas', nome: 'Não lidas' },
   { id: 'abertas', nome: 'Abertas' },
+  { id: 'arquivadas', nome: 'Arquivadas' },
 ]
 
 function Inbox({
@@ -411,7 +427,13 @@ function Inbox({
   setSearch,
   onSend,
   onRetry,
+  onEdit,
+  onDiscard,
   onClose,
+  onArchive,
+  onCreateContact,
+  onSendAudio,
+  onSendTemplate,
   onTransfer,
   onUploadPhoto,
   onImagem,
@@ -421,10 +443,20 @@ function Inbox({
   const [destino, setDestino] = useState('')
   const [filtro, setFiltro] = useState('todas')
   const [imagemWpp, setImagemWpp] = useState(null)
+  const [novoContato, setNovoContato] = useState(false)
+  const [contatoNome, setContatoNome] = useState('')
+  const [contatoNumero, setContatoNumero] = useState('')
+  const [contatoOptin, setContatoOptin] = useState(false)
+  const [gravando, setGravando] = useState(false)
+  const [segundosGravacao, setSegundosGravacao] = useState(0)
+  const [anexosAbertos, setAnexosAbertos] = useState(false)
   const [previaWpp, setPreviaWpp] = useState(null)
   const destinoRef = useRef(null)
   const fotoRef = useRef(null)
   const arquivoWppRef = useRef(null)
+  const audioWppRef = useRef(null)
+  const gravadorRef = useRef(null)
+  const cancelarGravacaoRef = useRef(false)
   const campoWppRef = useRef(null)
   // Sempre aponta para a conversa aberta agora: respostas assíncronas de outra conversa são ignoradas.
   const selectedIdRef = useRef(selectedId)
@@ -432,6 +464,12 @@ function Inbox({
   useEffect(() => setDraft(''), [selectedId])
   useEffect(() => setDestino(''), [selectedId])
   useEffect(() => { setImagemWpp(null); setPreviaWpp(null) }, [selectedId])
+  useEffect(() => setAnexosAbertos(false), [selectedId])
+  useEffect(() => {
+    if (!gravando) return undefined
+    const intervalo = window.setInterval(() => setSegundosGravacao((valor) => valor + 1), 1000)
+    return () => window.clearInterval(intervalo)
+  }, [gravando])
 
   useEffect(() => {
     if (!imagemWpp) { setPreviaWpp(null); return }
@@ -458,26 +496,70 @@ function Inbox({
     if (arquivoWppRef.current) arquivoWppRef.current.value = ''
   }
 
+  async function alternarGravacao() {
+    if (gravadorRef.current) {
+      gravadorRef.current.stop()
+      return
+    }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      window.alert('Gravação indisponível neste navegador. Anexe um arquivo MP3 ou OGG.')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const tipo = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'].find((item) => MediaRecorder.isTypeSupported(item))
+      if (!tipo) { stream.getTracks().forEach((track) => track.stop()); window.alert('Formato de gravação não suportado. Anexe um arquivo MP3 ou OGG.'); return }
+      const gravador = new MediaRecorder(stream, { mimeType: tipo })
+      const partes = []
+      const conversaId = selected.id
+      gravador.ondataavailable = (event) => { if (event.data.size) partes.push(event.data) }
+      gravador.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop())
+        gravadorRef.current = null
+        setGravando(false)
+        if (cancelarGravacaoRef.current) { cancelarGravacaoRef.current = false; return }
+        if (!partes.length) return
+        const mime = tipo.startsWith('audio/ogg') ? 'audio/ogg' : 'audio/webm'
+        await onSendAudio(conversaId, new Blob(partes, { type: mime }))
+      }
+      gravadorRef.current = gravador
+      cancelarGravacaoRef.current = false
+      setSegundosGravacao(0)
+      gravador.start()
+      setGravando(true)
+    } catch { window.alert('Não foi possível acessar o microfone. Confira a permissão do navegador.') }
+  }
+
+  function cancelarGravacao() {
+    if (!gravadorRef.current) return
+    cancelarGravacaoRef.current = true
+    gravadorRef.current.stop()
+  }
+
   // Só exibe o detalhe que pertence à conversa selecionada; um detalhe antigo nunca aparece.
   const temSelecao = selectedId !== null && selectedId !== undefined
   const atual = temSelecao && detail?.conversa?.id === selectedId ? detail : null
   const selected = atual?.conversa
+  const janelaBloqueada = me.whatsapp_provider === 'meta' && atual?.janela_texto_aberta === false
 
   const contagens = useMemo(
     () => ({
-      todas: conversations.length,
-      nao_lidas: conversations.filter((item) => item.nao_lidas > 0).length,
-      abertas: conversations.filter((item) => item.status === 'aberta').length,
+      todas: conversations.filter((item) => !item.arquivada).length,
+      nao_lidas: conversations.filter((item) => !item.arquivada && item.nao_lidas > 0).length,
+      abertas: conversations.filter((item) => !item.arquivada && item.status === 'aberta').length,
+      arquivadas: conversations.filter((item) => item.arquivada).length,
     }),
     [conversations],
   )
   const visiveis = useMemo(
     () =>
-      filtro === 'nao_lidas'
-        ? conversations.filter((item) => item.nao_lidas > 0)
-        : filtro === 'abertas'
-          ? conversations.filter((item) => item.status === 'aberta')
-          : conversations,
+      filtro === 'arquivadas'
+        ? conversations.filter((item) => item.arquivada)
+        : filtro === 'nao_lidas'
+          ? conversations.filter((item) => !item.arquivada && item.nao_lidas > 0)
+          : filtro === 'abertas'
+            ? conversations.filter((item) => !item.arquivada && item.status === 'aberta')
+            : conversations.filter((item) => !item.arquivada),
     [conversations, filtro],
   )
   const mensagemVazia = search.trim()
@@ -486,6 +568,8 @@ function Inbox({
       ? 'Nenhuma conversa com mensagens não lidas.'
       : filtro === 'abertas'
         ? 'Nenhuma conversa aberta no momento.'
+        : filtro === 'arquivadas'
+          ? 'Nenhuma conversa arquivada.'
         : 'Nenhuma conversa encontrada.'
 
   async function enviar() {
@@ -517,14 +601,27 @@ function Inbox({
     <div className={`inbox-layout atendimento-layout ${temSelecao ? 'atendimento-com-conversa' : ''}`}>
       <aside className="conversation-pane" aria-label="Conversas">
         <div className="pane-heading">
-          <div>
+          <div className="pane-title-row">
             <div className="eyebrow">CENTRAL</div>
-            <h2>{me.role === 'gestor' ? 'Conversas' : 'Meus atendimentos'}</h2>
+            <div className="pane-title-line">
+              <h2>{me.role === 'gestor' ? 'Conversas' : 'Meus atendimentos'}</h2>
+              <span className="count-chip" title="Conversas neste filtro">{contagens[filtro]}</span>
+            </div>
           </div>
-          <span className="count-chip" title="Total de conversas">
-            {conversations.length}
-          </span>
+          <button type="button" className="button button-soft novo-contato-botao" onClick={() => setNovoContato((valor) => !valor)} aria-label="Novo contato" title="Novo contato">+</button>
         </div>
+        {novoContato && <form className="novo-contato-form" onSubmit={async (event) => {
+          event.preventDefault()
+          const id = await onCreateContact(contatoNome, contatoNumero, contatoOptin)
+          if (id) { setNovoContato(false); setContatoNome(''); setContatoNumero(''); setContatoOptin(false); onSelect(id) }
+        }}>
+          <strong>Novo contato</strong>
+          <input aria-label="Nome do contato" placeholder="Nome" required maxLength={120} value={contatoNome} onChange={(event) => setContatoNome(event.target.value)} />
+          <input aria-label="Número do contato" placeholder="55 + DDD + número" required inputMode="tel" value={contatoNumero} onChange={(event) => setContatoNumero(event.target.value)} />
+          <label><input type="checkbox" checked={contatoOptin} onChange={(event) => setContatoOptin(event.target.checked)} required /> Confirmo que o contato autorizou mensagens da empresa.</label>
+          <small>{me.whatsapp_provider === 'meta' ? 'O primeiro envio usa um template aprovado pela Meta. Sem META_TEMPLATE_NOME, o contato será salvo sem envio.' : 'No simulador, o primeiro envio será registrado localmente.'}</small>
+          <button className="button button-primary" disabled={busy}>Adicionar contato</button>
+        </form>}
         <div className="search-box" role="search">
           <Icon name="search" size={17} />
           <input
@@ -681,11 +778,24 @@ function Inbox({
               messages={atual.mensagens}
               currentUserId={me.id}
               onRetry={(messageId) => onRetry(selected.id, messageId)}
+              onEdit={(messageId, texto) => onEdit(selected.id, messageId, texto)}
+              onDiscard={(messageId) => onDiscard(selected.id, messageId)}
               onImagem={onImagem}
               busy={busy}
             />
             {selected.status === 'aberta' ? (
               <div className="chat-composer atendimento-composer">
+                {janelaBloqueada && <div className="janela-meta-aviso" role="status">
+                  <strong>Janela de resposta encerrada</strong>
+                  <span>Atualizar o token não reabre as 24 horas. Peça ao cliente para enviar uma mensagem ou use um template aprovado pela Meta para retomar.</span>
+                </div>}
+                {gravando && <div role="status" className="gravacao-status"><span className="gravacao-ponto" />Gravando {String(Math.floor(segundosGravacao / 60)).padStart(2, '0')}:{String(segundosGravacao % 60).padStart(2, '0')}<button type="button" onClick={cancelarGravacao}>Cancelar</button><span>Toque no microfone verde para enviar.</span></div>}
+                {selected.contato_optin && me.whatsapp_provider === 'meta' && (
+                  <div className="template-contato-note">
+                    <span>{me.meta_template_disponivel ? 'Contato com consentimento: use o template para iniciar ou retomar após 24 horas.' : 'Contato salvo. Configure um template aprovado da Meta para iniciar a conversa.'}</span>
+                    {me.meta_template_disponivel && <button type="button" className="button button-soft" disabled={busy} onClick={() => onSendTemplate(selected.id)}>Enviar template</button>}
+                  </div>
+                )}
                 {imagemWpp && (
                   <div className="int-attachment">
                     {previaWpp && <img src={previaWpp} alt="" />}
@@ -708,16 +818,18 @@ function Inbox({
                     hidden
                     onChange={(e) => escolherImagemWpp(e.target.files?.[0])}
                   />
-                  <button
-                    type="button"
-                    className="int-icon-btn"
-                    onClick={() => arquivoWppRef.current?.click()}
-                    disabled={busy}
-                    aria-label="Anexar imagem"
-                    title="Anexar imagem"
-                  >
-                    <Icon name="clip" size={20} />
-                  </button>
+                  <input ref={audioWppRef} type="file" accept=".mp3,.ogg,audio/mpeg,audio/ogg" hidden onChange={async (event) => {
+                    const arquivo = event.target.files?.[0]
+                    event.target.value = ''
+                    if (arquivo && selected) await onSendAudio(selected.id, arquivo)
+                  }} />
+                  <div className="anexo-menu-wrap">
+                    <button type="button" className="int-icon-btn" onClick={() => setAnexosAbertos((valor) => !valor)} disabled={busy || janelaBloqueada || gravando} aria-label="Anexar arquivo" aria-expanded={anexosAbertos} title="Anexar arquivo"><Icon name="clip" size={20} /></button>
+                    {anexosAbertos && <div className="anexo-menu" role="menu">
+                      <button type="button" role="menuitem" onClick={() => { setAnexosAbertos(false); arquivoWppRef.current?.click() }}>Imagem</button>
+                      <button type="button" role="menuitem" onClick={() => { setAnexosAbertos(false); audioWppRef.current?.click() }}>Áudio MP3/OGG</button>
+                    </div>}
+                  </div>
                   <textarea
                     ref={campoWppRef}
                     value={draft}
@@ -740,14 +852,15 @@ function Inbox({
                     rows="1"
                     maxLength="4000"
                     required={!imagemWpp}
+                    disabled={janelaBloqueada || gravando}
                   />
-                  <button
+                  {(draft.trim() || imagemWpp) && !gravando ? <button
                     className="button button-primary"
-                    disabled={busy || (!draft.trim() && !imagemWpp)}
+                    disabled={busy || janelaBloqueada || (!draft.trim() && !imagemWpp)}
                     title="Enviar resposta"
                   >
                     <Icon name="send" size={18} /><span>Enviar</span>
-                  </button>
+                  </button> : <button type="button" className={`atendimento-mic ${gravando ? 'gravando-audio' : ''}`} onClick={alternarGravacao} disabled={busy || janelaBloqueada} aria-label={gravando ? 'Parar e enviar gravação' : 'Gravar áudio'} title={gravando ? 'Parar e enviar gravação' : 'Gravar áudio'}><Icon name="mic" size={20} /></button>}
                 </form>
                 <small className="composer-hint" id="atendimento-dica">
                   Ctrl+Enter ou Shift+Enter para enviar · /transferir para escolher destino
@@ -790,11 +903,17 @@ function Inbox({
                   >
                     Encerrar conversa
                   </button>
+                  <button type="button" className="text-button" disabled={busy} onClick={() => onArchive(selected.id, !selected.arquivada)}>
+                    {selected.arquivada ? 'Desarquivar' : 'Arquivar'}
+                  </button>
                 </div>
               </div>
             ) : (
               <div className="closed-note" role="status">
                 Esta conversa foi encerrada.
+                <button type="button" className="text-button" disabled={busy} onClick={() => onArchive(selected.id, !selected.arquivada)}>
+                  {selected.arquivada ? 'Desarquivar' : 'Arquivar'}
+                </button>
               </div>
             )}
           </>
@@ -2044,6 +2163,23 @@ export default function App() {
               }
               return action(`/api/atendimentos/${id}/mensagens`, { texto }, 'Resposta enviada.')
             }}
+            onSendAudio={(id, arquivo) => actionRaw(`/api/atendimentos/${id}/mensagens`, {
+              method: 'POST', headers: { 'Content-Type': arquivo.type || (arquivo.name.toLowerCase().endsWith('.ogg') ? 'audio/ogg' : 'audio/mpeg') }, body: arquivo,
+            }, 'Áudio enviado.')}
+            onSendTemplate={(id) => action(`/api/atendimentos/${id}/template`, {}, 'Template enviado ao contato.')}
+            onCreateContact={async (nome, numero, optin) => {
+              setBusy(true); setError('')
+              try {
+                const body = new URLSearchParams({ nome, numero, optin: optin ? 'sim' : 'nao' })
+                const resposta = await fetch('/api/atendimentos/novo-contato', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }, body })
+                const dados = await resposta.json()
+                if (!resposta.ok) throw new Error(dados.detail || 'Não foi possível iniciar o contato.')
+                await refreshConversations()
+                setNotice(dados.template_enviado ? 'Contato criado e template enviado.' : 'Contato salvo. Para iniciar no WhatsApp, configure um template aprovado pela Meta.')
+                return dados.id
+              } catch (falha) { setError(falha.message); return null }
+              finally { setBusy(false) }
+            }}
             onImagem={(url, titulo) => setImagemModal({ url, titulo: titulo || 'Imagem da mensagem' })}
             onRetry={(id, messageId) =>
               action(
@@ -2052,6 +2188,16 @@ export default function App() {
                 'Mensagem reenviada.',
               )
             }
+            onEdit={(id, messageId, texto) => actionRaw(
+              `/api/atendimentos/${id}/mensagens/${messageId}`,
+              { method: 'PATCH', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }, body: new URLSearchParams({ texto }) },
+              'Mensagem com falha alterada para o próximo reenvio.',
+            )}
+            onDiscard={(id, messageId) => actionRaw(
+              `/api/atendimentos/${id}/mensagens/${messageId}`,
+              { method: 'DELETE' },
+              'Registro local da mensagem com falha descartado.',
+            )}
             onTransfer={(id, destino) =>
               action(
                 `/api/atendimentos/${id}/transferir`,
@@ -2083,6 +2229,9 @@ export default function App() {
                 }
               })
             }
+            onArchive={(id, arquivar) => action(`/api/atendimentos/${id}/${arquivar ? 'arquivar' : 'desarquivar'}`, {}, arquivar ? 'Conversa arquivada.' : 'Conversa desarquivada.').then((ok) => {
+              if (ok) { setSelectedId(null); setDetail(null) }
+            })}
           />
         )}
         {page === 'manager' && (
@@ -2162,7 +2311,7 @@ export default function App() {
               usuarios={config?.usuarios || []}
               busy={busy}
               onRequest={(id) =>
-                action(`/api/chamados/${id}/acessos`, {}, 'Acesso remoto simulado e registrado.')
+                action(`/api/chamados/${id}/acessos`, {}, 'Solicitação de acesso registrada.')
               }
               onClose={(id, solucao) =>
                 action(

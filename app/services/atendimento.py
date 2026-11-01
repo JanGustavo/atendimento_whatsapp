@@ -232,6 +232,9 @@ async def receber_mensagem(
         return
     if entrada.nome_contato:
         conversa.nome_contato = entrada.nome_contato
+    # Uma nova mensagem traz de volta uma conversa arquivada sem reiniciar o bot.
+    conversa.arquivada_em = None
+    conversa.arquivada_por_id = None
     if conversa.primeira_resposta_em is None and not em_expediente(now()):
         if conversa.etapa != "fora_expediente":
             conversa.etapa = "fora_expediente"

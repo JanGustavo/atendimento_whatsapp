@@ -19,6 +19,12 @@ class SimuladorProvider:
     ) -> str | None:
         return None
 
+    async def enviar_audio(self, numero: str, audio_chave: str) -> str | None:
+        return None
+
+    async def enviar_template(self, numero: str, nome: str, idioma: str) -> str | None:
+        return None
+
     def parse_webhook(self, payload: dict) -> MensagemEntrada | None:
         try:
             return MensagemEntrada(

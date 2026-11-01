@@ -57,6 +57,19 @@ As regras para pop-up no sistema operacional, barra de privacidade durante uma s
 
 ## Eventos reais do MeshCentral (integração opt-in)
 
+Na aba **Chamados**, gestor e supervisor encontram **Abrir MeshCentral**. O botão
+abre `MESHCENTRAL_URL` em outra aba e exige autenticação própria no MeshCentral;
+ele não concede acesso a um PC. No ambiente atual, `REMOTO_PROVIDER=simulado`,
+então **Solicitar acesso** registra apenas uma simulação. A interface
+`mesh.jangustavo.me` exige Cloudflare Access e depois login no MeshCentral.
+Para acessar um PC fora da rede, tanto o operador quanto o agente instalado no
+PC precisam alcançar o servidor pela Internet. A política Access interativa
+atual protege a interface, mas impede o MeshAgent de se conectar; uma rota de
+agente separada e validada ainda é necessária. O PC cadastrado como grupo
+`dono` continua bloqueado para solicitações da administração pelo painel.
+Uso pessoal do próprio PC de casa exige conta e permissões específicas no
+MeshCentral, sem passar por esse fluxo de chamado.
+
 A FortGiro pode observar o WebSocket autenticado do MeshCentral para identificar
 **início e fim reais do relay de desktop** (`relaylog`, protocolo 2), registrar
 ID da sessão, computador, técnico e horários na tabela `sessoes_meshcentral`.

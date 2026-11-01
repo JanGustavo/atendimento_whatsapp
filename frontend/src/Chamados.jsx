@@ -263,7 +263,7 @@ function CadastroComputador({ usuarios, busy, onCreateComputer }) {
 }
 
 export default function Chamados({ me, chamados, computadores, usuarios, busy, onRequest, onClose, onCreateComputer }) {
-  const [sessoesRemotas, setSessoesRemotas] = useState({ monitor_conectado: false, sessoes: [] })
+  const [sessoesRemotas, setSessoesRemotas] = useState({ monitor_conectado: false, meshcentral_url: null, remoto_provider: 'simulado', sessoes: [] })
   useEffect(() => {
     let ativo = true
     async function atualizar() {
@@ -284,6 +284,17 @@ export default function Chamados({ me, chamados, computadores, usuarios, busy, o
     tituloLista="Todos os chamados"
     descricaoLista="Os pedidos novos aparecem automaticamente."
     lateral={<>
+      <section className="surface tickets-side-card chamados-painel mesh-atalho">
+        <div className="eyebrow">ACESSO REMOTO</div>
+        <h3>MeshCentral</h3>
+        <p>{sessoesRemotas.remoto_provider === 'meshcentral'
+          ? 'Abra o servidor em outra aba com sua conta MeshCentral. A autorização do chamado e a confirmação no computador são etapas separadas.'
+          : 'O painel ainda registra solicitações simuladas. O MeshCentral abre em outra aba e exige login próprio.'}</p>
+        {sessoesRemotas.meshcentral_url
+          ? <a className="button button-soft mesh-atalho-link" href={sessoesRemotas.meshcentral_url} target="_blank" rel="noopener noreferrer">Abrir MeshCentral ↗</a>
+          : <small>Configure MESHCENTRAL_URL para abrir o servidor.</small>}
+        <small>O botão abre o servidor; não inicia acesso a um computador.</small>
+      </section>
       <ListaComputadores computadores={computadores} />
       {me.role === 'gestor' && <CadastroComputador usuarios={usuarios} busy={busy} onCreateComputer={onCreateComputer} />}
     </>}

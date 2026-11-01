@@ -17,6 +17,8 @@ async def test_painel_react_e_api_isolada_por_papel(ambiente):
         "role": "colaborador",
         "foto_url": None,
         "presenca_intervalo_segundos": 30,
+        "whatsapp_provider": "simulador",
+        "meta_template_disponivel": False,
     }
     lista = (await client.get("/api/atendimentos")).json()
     assert [item["id"] for item in lista] == [10]

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     meta_access_token: str = ""
     meta_verify_token: str = ""
     meta_app_secret: str = ""
+    meta_template_nome: str = ""
+    meta_template_idioma: str = "pt_BR"
     aviso_transferencia_ativo: bool = True
     aviso_transferencia_texto: str = "Seu atendimento foi transferido para {nome}."
     app_log_level: str = "INFO"

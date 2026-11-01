@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     meshcentral_audit_password: str = ""
     panel_https_host: str = ""
     media_dir: str = "./media"
+    retencao_conversas_dias: int = 180
     presenca_intervalo_segundos: int = 30
     presenca_limite_segundos: int = 90
     timer_espera_segundos: int = 90

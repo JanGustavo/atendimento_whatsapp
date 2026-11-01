@@ -300,4 +300,5 @@ async def test_encerrar_conversa_grava_estado_e_respeita_isolamento(ambiente):
         conversa = await db.get(Conversa, 10)
         assert conversa.etapa == "encerrada"
         assert conversa.status == "encerrada"
+        assert conversa.encerrada_em is not None
         assert conversa.timer_prazo_em is None

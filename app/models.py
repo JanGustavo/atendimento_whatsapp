@@ -118,6 +118,7 @@ class Conversa(Base):
     etapa: Mapped[str] = mapped_column(String(30), default="menu_setor", nullable=False)
     criada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
     primeira_resposta_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    encerrada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     arquivada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     arquivada_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
     contato_optin_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

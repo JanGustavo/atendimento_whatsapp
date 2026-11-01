@@ -645,7 +645,7 @@ async def encerrar(
     resultado = await db.execute(
         update(Conversa)
         .where(*condicoes)
-        .values(status="encerrada", etapa="encerrada", timer_prazo_em=None)
+        .values(status="encerrada", etapa="encerrada", encerrada_em=now(), timer_prazo_em=None)
     )
     if resultado.rowcount != 1:
         await db.rollback()

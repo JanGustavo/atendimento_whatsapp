@@ -9,6 +9,14 @@ e conferida. O crontab do usuário executa o script às 02:00, no horário de
 São Paulo. `BACKUP_KEEP_DAYS` controla a retenção; o padrão é 30 dias. Guarde
 também uma cópia em outro disco para proteção contra falha do disco principal.
 
+Após um backup bem-sucedido, a mesma rotina exclui conversas encerradas há
+`RETENCAO_CONVERSAS_DIAS` (padrão: 180) e suas mensagens e mídias sem outras
+referências. Conversas abertas não entram na exclusão. Para registros encerrados
+antes da migração 0022, a contagem começa na data da migração, pois a data real
+de encerramento não era armazenada. Backups anteriores ainda podem conter esses
+dados por até 30 dias adicionais. O prazo foi escolhido para este projeto;
+[a ANPD esclarece que a LGPD não fixa um prazo universal](https://www.gov.br/anpd/pt-br/acesso-a-informacao/perguntas-frequentes).
+
 1. Copie `.env.example` para `.env` e troque `JWT_SECRET` e as três senhas `SEED_*_PASSWORD`. O banco do contêiner usa `/data/atendimento.db` no volume do Compose.
 2. Suba o app em segundo plano: `docker compose up -d --build`. O serviço está configurado para reiniciar automaticamente após a inicialização do Docker, salvo se tiver sido parado explicitamente.
 3. Em outro terminal, crie os usuários e setores: `docker compose exec app python -m app.scripts.seed`. O seed pode ser executado novamente sem duplicar os registros.

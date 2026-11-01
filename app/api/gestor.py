@@ -84,6 +84,8 @@ async def configurar_simulador(
     db: AsyncSession = Depends(get_db),
     user: UsuarioAtual = Depends(somente_gestor),
 ):
+    if not get_settings().enable_simulator:
+        raise HTTPException(status_code=404, detail="Simulador desativado")
     dados = await form(request)
     estado = await db.get(SimuladorEstado, 1)
     if estado is None:

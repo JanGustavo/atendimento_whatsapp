@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
     whatsapp_provider: Literal["simulador", "meta"] = "simulador"
+    enable_simulator: bool = False
     meta_graph_version: str = "v24.0"
     meta_phone_number_id: str = ""
     meta_access_token: str = ""

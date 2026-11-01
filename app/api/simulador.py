@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import form
 from app.api.deps import UsuarioAtual, somente_gestor
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.models import SimuladorEstado
 from app.providers import CLIENTES, simulador_provider
@@ -19,6 +20,8 @@ async def simulador_enviar(
     db: AsyncSession = Depends(get_db),
     user: UsuarioAtual = Depends(somente_gestor),
 ):
+    if not get_settings().enable_simulator:
+        raise HTTPException(status_code=404, detail="Simulador desativado")
     estado = await db.get(SimuladorEstado, 1)
     if estado is None or not estado.ativo:
         raise HTTPException(status_code=403, detail="Simulador desativado")

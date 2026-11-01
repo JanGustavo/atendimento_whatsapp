@@ -325,7 +325,7 @@ async def configuracao_gestor(
     )
     simulador = await db.get(SimuladorEstado, 1)
     return {
-        "simulador_ativo": bool(simulador and simulador.ativo),
+        "simulador_ativo": bool(get_settings().enable_simulator and simulador and simulador.ativo),
         "setores_internos": [{"id": item.id, "nome": item.nome, "icone": item.icone} for item in setores_internos],
         "usuarios": [
             {
@@ -359,6 +359,8 @@ async def dados_simulador(
     db: AsyncSession = Depends(get_db),
     user: UsuarioAtual = Depends(somente_gestor),
 ):
+    if not get_settings().enable_simulator:
+        raise HTTPException(status_code=404, detail="Simulador desativado")
     simulador = await db.get(SimuladorEstado, 1)
     if simulador is None or not simulador.ativo:
         raise HTTPException(status_code=403, detail="Simulador desativado")

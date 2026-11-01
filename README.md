@@ -1,5 +1,14 @@
 # Atendimento WhatsApp — alpha
 
+## Backup diário
+
+`app/scripts/backup_dados.sh` copia o SQLite com `sqlite3.Connection.backup()`
+(equivalente a `.backup`) e a pasta `/data/media` para
+`../atendimento_whatsapp-backups`. Cada cópia é restaurada em pasta temporária
+e conferida. O crontab do usuário executa o script às 02:00, no horário de
+São Paulo. `BACKUP_KEEP_DAYS` controla a retenção; o padrão é 30 dias. Guarde
+também uma cópia em outro disco para proteção contra falha do disco principal.
+
 1. Copie `.env.example` para `.env` e troque `JWT_SECRET` e as três senhas `SEED_*_PASSWORD`. O banco do contêiner usa `/data/atendimento.db` no volume do Compose.
 2. Suba o app em segundo plano: `docker compose up -d --build`. O serviço está configurado para reiniciar automaticamente após a inicialização do Docker, salvo se tiver sido parado explicitamente.
 3. Em outro terminal, crie os usuários e setores: `docker compose exec app python -m app.scripts.seed`. O seed pode ser executado novamente sem duplicar os registros.

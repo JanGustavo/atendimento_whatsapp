@@ -40,7 +40,12 @@ class RemotoMeshCentral:
     def link_acesso(self, computador: Computador) -> str | None:
         if not computador.mesh_node_id:
             return None
-        return f"{self.url}/?{urlencode({'node': computador.mesh_node_id, 'viewmode': 11})}"
+        # The server resolves node=<short ID> before rendering the page.
+        # View 11 selects Desktop; view 12 is Terminal in this version.
+        partes = computador.mesh_node_id.split("/")
+        if len(partes) != 3 or partes[0] != "node" or not partes[2]:
+            return None
+        return f"{self.url}/?{urlencode({'node': partes[2], 'viewmode': 11})}"
 
 
 remoto_provider: RemotoProvider = RemotoSimulado()

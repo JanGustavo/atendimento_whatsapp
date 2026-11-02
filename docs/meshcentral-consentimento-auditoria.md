@@ -2,15 +2,16 @@
 
 ## Estado atual
 
-O painel React exibe uma janela de consentimento quando o colaborador estiver
-logado na seção **Meus chamados**. Ela mostra o supervisor solicitante, o
-computador, o chamado e a descrição do problema. A decisão e seus autores ficam
-registrados no banco. Expirações continuam sendo avaliadas nas chamadas da API.
+Com `REMOTO_PROVIDER=meshcentral`, o gestor ou supervisor registra um pedido no
+chamado. O painel mostra a ele um link para o computador por cinco minutos. O
+colaborador vê o pedido no painel, mas **não precisa aprová-lo no React**: ao
+iniciar a conexão, o MeshCentral pede consentimento no próprio computador. A
+solicitação e seu cancelamento ficam registrados em `acessos_remotos`.
 
-**Este pop-up NÃO é um aviso do sistema operacional.** A janela só existe com
-o painel aberto e não impede acesso por um MeshCentral configurado fora deste
-sistema. O produto mantém acesso remoto real desabilitado, inclusive após uma
-autorização no React. O atributo `sessao_remota_ativa` é falso neste estágio.
+O link temporário controla a interface FortGiro, não as permissões internas
+do MeshCentral. Se o técnico já abriu a página do dispositivo, cancelar o
+pedido no painel não encerra uma sessão. O colaborador deve usar a barra de
+privacidade do agente para interromper uma conexão ativa.
 
 ## Proteções exigidas antes de habilitar MeshCentral real
 
@@ -56,6 +57,10 @@ documenta `userConsentFlags` e a barra de privacidade. Adaptar ao
         "fileprompt": true
       },
       "consentMessages": {
+        "Title": "FortGiro - autorização de acesso remoto",
+        "Desktop": "{0} solicita acesso à área de trabalho deste computador para atendimento. Autorizar?",
+        "Terminal": "{0} solicita acesso ao terminal deste computador para atendimento. Autorizar?",
+        "Files": "{0} solicita acesso aos arquivos deste computador para atendimento. Autorizar?",
         "consentTimeout": 60,
         "autoAcceptOnTimeout": false,
         "autoAcceptIfNoUser": false
@@ -65,9 +70,17 @@ documenta `userConsentFlags` e a barra de privacidade. Adaptar ao
 }
 ```
 
-Esses valores são referência **para configuração futura**, não estão aplicados
-pelo Docker Compose deste repositório. Conferir compatibilidade e
-comportamento com a versão instalada antes de usar em ambiente real.
+Em 02/11/2026, esses valores foram conferidos no `config.json` do MeshCentral
+em execução. O arquivo fica no volume do MeshCentral e não é gerado pelo
+Compose; uma instalação nova precisa configurá-los e validar o comportamento
+com um computador real.
+
+O aviso nativo aceita título e texto personalizados, mas seu desenho pertence
+ao agente/sistema operacional. Os textos em português foram aplicados ao
+servidor em 02/11/2026, mantendo as opções de aceite existentes. No painel
+FortGiro, avisos destacados de início e fim dependem do monitor de eventos
+conectado; `MESHCENTRAL_EVENT_MONITOR=false` ou a ausência de uma conta de
+auditoria impedem confirmar esses eventos automaticamente.
 
 ## Auditoria atual vs. futura
 
@@ -77,10 +90,11 @@ A tabela `acessos_remotos` guarda solicitante, PC, chamado, horário do pedido
 fim/encerramento do fluxo (`fim_em`, `encerrado_por_id`).
 O motivo é a descrição vinculada ao chamado.
 
-**Nenhum desses horários comprova uma sessão de desktop iniciada.** Campos
-próprios de sessão real e confirmação de encerramento devem ser introduzidos
-quando houver integração MeshCentral. Os logs atuais são registros no banco
-operacional; ainda não são imutáveis nem equivalem a prova pericial.
+**O pedido pendente não comprova uma sessão de desktop iniciada.** A tabela
+`sessoes_meshcentral` recebe eventos de início e fim somente quando o monitor
+de eventos está configurado. Neste ambiente, `MESHCENTRAL_EVENT_MONITOR=false`;
+o painel ainda não confirma o resultado da sessão real. Os registros SQLite
+não são imutáveis nem equivalem a prova pericial.
 
 ## Privacidade e comunicação interna
 

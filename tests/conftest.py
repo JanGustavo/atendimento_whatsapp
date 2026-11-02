@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("JWT_SECRET", "segredo-exclusivo-dos-testes-m1")
 os.environ["WHATSAPP_PROVIDER"] = "simulador"
+os.environ["REMOTO_PROVIDER"] = "simulado"
 os.environ["ENABLE_SIMULATOR"] = "true"
 os.environ["EXPEDIENTE_INICIO"] = "00:00"
 os.environ["EXPEDIENTE_FIM"] = "23:59"

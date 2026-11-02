@@ -4,7 +4,7 @@ import hmac
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,6 +18,7 @@ from app.services.meshcentral_events import monitor_conectado
 from app.services.remoto import RemotoMeshCentral, provider_remoto_atual
 
 router = APIRouter()
+PRAZO_PEDIDO_MESH = timedelta(minutes=5)
 
 
 async def expirar_pendentes(db: AsyncSession) -> None:
@@ -44,9 +45,23 @@ def serializar_acesso(acesso: AcessoRemoto, computador_nome: str, motivo: str) -
         "respondido_em": acesso.respondido_em.isoformat() if acesso.respondido_em else None,
         "encerrado_por_id": acesso.encerrado_por_id,
         "fim_em": acesso.fim_em.isoformat() if acesso.fim_em else None,
-        "sessao_remota_ativa": False,  # ainda nao ha integracao MeshCentral
+        "sessao_remota_ativa": acesso.resultado == "aceito" and acesso.fim_em is None,
         "acesso_url": None,
+        "confirmacao_no_mesh": isinstance(provider_remoto_atual(), RemotoMeshCentral),
     }
+
+
+def link_mesh_solicitado(acesso: AcessoRemoto, computador: Computador) -> str | None:
+    """Link temporario; a confirmacao final ocorre no agente MeshCentral."""
+    if (
+        acesso.resultado != "pendente"
+        or acesso.fim_em is not None
+        or acesso.expira_em is None
+        or acesso.expira_em <= agora()
+        or computador.grupo != "empresa"
+    ):
+        return None
+    return provider_remoto_atual().link_acesso(computador)
 
 
 def validar_token(token: str) -> None:
@@ -186,6 +201,14 @@ async def abrir_meu_chamado(
     return {"id": chamado.id, "status": chamado.status}
 
 
+@router.get("/api/chamados/pendentes")
+async def contar_chamados_pendentes(
+    db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(suporte)
+):
+    quantidade = await db.scalar(select(func.count(Chamado.id)).where(Chamado.status == "aberto"))
+    return {"aguardando_resposta": quantidade or 0}
+
+
 @router.get("/api/chamados")
 async def listar_chamados(
     db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(suporte)
@@ -194,7 +217,9 @@ async def listar_chamados(
         (
             await db.execute(
                 select(Chamado)
-                .options(selectinload(Chamado.computador))
+                .options(
+                    selectinload(Chamado.computador).selectinload(Computador.dono)
+                )
                 .order_by(Chamado.id.desc())
             )
         )
@@ -223,6 +248,11 @@ async def listar_chamados(
                 "chamado_id": acesso.chamado_id,
                 "computador_id": acesso.computador_id,
                 "computador_nome": chamados_por_id[acesso.chamado_id].computador.nome,
+                "dono_nome": (
+                    chamados_por_id[acesso.chamado_id].computador.dono.nome
+                    if chamados_por_id[acesso.chamado_id].computador.dono
+                    else None
+                ),
                 "motivo": chamados_por_id[acesso.chamado_id].descricao,
                 "solicitante": acesso.solicitante.nome,
                 "solicitante_id": acesso.solicitante_id,
@@ -231,12 +261,14 @@ async def listar_chamados(
                 "respondido_por_id": acesso.respondido_por_id,
                 "respondido_em": acesso.respondido_em.isoformat() if acesso.respondido_em else None,
                 "encerrado_por_id": acesso.encerrado_por_id,
-                "sessao_remota_ativa": False,
+                "sessao_remota_ativa": acesso.resultado == "aceito" and acesso.fim_em is None,
                 "resultado": acesso.resultado,
                 "inicio_em": acesso.inicio_em.isoformat(),
                 "fim_em": acesso.fim_em.isoformat() if acesso.fim_em else None,
                 "expira_em": acesso.expira_em.isoformat() if acesso.expira_em else None,
-                "acesso_url": None,  # Fail closed ate existir revogacao real MeshCentral.
+                "acesso_url": link_mesh_solicitado(
+                    acesso, chamados_por_id[acesso.chamado_id].computador
+                ),
             }
         )
     return [
@@ -244,6 +276,8 @@ async def listar_chamados(
             "id": chamado.id,
             "computador_id": chamado.computador_id,
             "computador_nome": chamado.computador.nome,
+            "dono_id": chamado.computador.dono_id,
+            "dono_nome": chamado.computador.dono.nome if chamado.computador.dono else None,
             "grupo": chamado.computador.grupo,
             "descricao": chamado.descricao,
             "status": chamado.status,
@@ -338,7 +372,7 @@ async def solicitar_acesso(
     if chamado.status == "fechado":
         raise HTTPException(status_code=409, detail="Chamado fechado")
     await expirar_pendentes(db)
-    pendente = (await db.execute(select(AcessoRemoto.id).where(AcessoRemoto.computador_id == chamado.computador_id, AcessoRemoto.resultado == "pendente"))).first()
+    pendente = (await db.execute(select(AcessoRemoto.id).where(AcessoRemoto.computador_id == chamado.computador_id, AcessoRemoto.resultado.in_(["pendente", "aceito"]), AcessoRemoto.fim_em.is_(None)))).first()
     if pendente:
         raise HTTPException(status_code=409, detail="Ja existe uma solicitacao pendente para este computador")
     provider = provider_remoto_atual()
@@ -360,13 +394,13 @@ async def solicitar_acesso(
         computador_id=chamado.computador_id,
         inicio_em=instante,
         fim_em=instante if resultado in {"recusado", "cancelado", "simulado"} else None,
-        expira_em=instante + timedelta(seconds=60) if resultado == "pendente" else None,
+        expira_em=instante + PRAZO_PEDIDO_MESH if resultado == "pendente" else None,
         resultado=resultado,
     )
     db.add(acesso)
     await db.commit()
     return {"id": acesso.id, "resultado": acesso.resultado,
-            "acesso_url": None}
+            "acesso_url": link_mesh_solicitado(acesso, chamado.computador)}
 
 
 @router.post("/api/chamados/{chamado_id}/fechar")
@@ -405,7 +439,7 @@ async def meus_acessos(db: AsyncSession = Depends(get_db), user: UsuarioAtual = 
             .where(
                 Computador.dono_id == user.user_id,
                 Computador.grupo == "empresa",
-                AcessoRemoto.resultado.in_(["pendente", "autorizado"]),
+                AcessoRemoto.resultado.in_(["pendente", "autorizado", "aceito"]),
             )
             .order_by(AcessoRemoto.id.desc())
         )
@@ -419,6 +453,8 @@ async def meus_acessos(db: AsyncSession = Depends(get_db), user: UsuarioAtual = 
 
 @router.post("/api/meus-acessos/{acesso_id}/decisao")
 async def decidir_acesso(acesso_id: int, request: Request, db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(vendedor)):
+    if isinstance(provider_remoto_atual(), RemotoMeshCentral):
+        raise HTTPException(status_code=409, detail="Confirme o acesso no próprio computador pelo MeshCentral")
     dados = await form(request)
     decisao = dados.get("decisao")
     if decisao not in {"autorizar", "recusar"}:

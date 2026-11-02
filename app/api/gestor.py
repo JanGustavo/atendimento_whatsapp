@@ -1,6 +1,8 @@
 """Rotas do painel do gestor: visão global, usuários, setores, transferências."""
 
-from datetime import timedelta
+import json
+import re
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.requests import Request
@@ -11,12 +13,15 @@ from app.api._shared import form
 from app.api.atendimentos import conversa_visivel
 from app.api.deps import UsuarioAtual, somente_gestor
 from app.core.config import get_settings
-from app.core.database import get_db
+from app.core.database import Base, get_db
 from app.core.utils import now
 from app.models import (
     Atribuicao,
+    ConfiguracaoBot,
     Conversa,
     Mensagem,
+    MensagemGrupo,
+    LeituraInterna,
     Setor,
     SetorInterno,
     SimuladorEstado,
@@ -27,6 +32,52 @@ from app.services.auth_service import get_password_hash
 
 router = APIRouter(prefix="/api/gestor")
 ICONES_SETOR = {"equipe", "vendas", "estoque", "garantia", "devolucao", "atendimento", "administracao"}
+
+
+@router.post("/configuracao-bot")
+async def salvar_configuracao_bot(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(somente_gestor),
+):
+    dados = await form(request)
+    try:
+        horarios = json.loads(dados.get("horarios", ""))
+        dias_fechados = json.loads(dados.get("dias_fechados", ""))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Agenda inválida") from None
+    if not isinstance(horarios, dict) or set(horarios) != {str(i) for i in range(7)}:
+        raise HTTPException(status_code=422, detail="Informe os sete dias da semana")
+    for periodo in horarios.values():
+        if (not isinstance(periodo, dict) or type(periodo.get("ativo")) is not bool
+                or not isinstance(periodo.get("inicio"), str) or not isinstance(periodo.get("fim"), str)
+                or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", periodo["inicio"])
+                or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", periodo["fim"])
+                or periodo["inicio"] >= periodo["fim"]):
+            raise HTTPException(status_code=422, detail="Horário inválido; início deve ser antes do fim")
+    if (not isinstance(dias_fechados, list) or len(dias_fechados) > 100
+            or any(not isinstance(dia, str) for dia in dias_fechados)):
+        raise HTTPException(status_code=422, detail="Datas fechadas inválidas")
+    try:
+        datas = sorted({date.fromisoformat(dia).isoformat() for dia in dias_fechados})
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Data fechada inválida") from None
+    textos = {}
+    for campo in ("mensagem_fora_expediente", "mensagem_reabertura", "mensagem_standby"):
+        texto = dados.get(campo, "").strip()
+        if not 1 <= len(texto) <= 600:
+            raise HTTPException(status_code=422, detail=f"Texto inválido: {campo}")
+        textos[campo] = texto
+    registro = await db.get(ConfiguracaoBot, 1)
+    if registro is None:
+        registro = ConfiguracaoBot(id=1)
+        db.add(registro)
+    registro.horarios = horarios
+    registro.dias_fechados = datas
+    for campo, texto in textos.items():
+        setattr(registro, campo, texto)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/setores-internos")
@@ -78,6 +129,30 @@ async def renomear_setor_interno(
     return {"id": setor.id, "nome": setor.nome, "icone": setor.icone}
 
 
+@router.delete("/setores-internos/{setor_id}")
+async def excluir_setor_interno(
+    setor_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(somente_gestor),
+):
+    setor = await db.get(SetorInterno, setor_id)
+    if setor is None:
+        raise HTTPException(status_code=404, detail="Setor não encontrado")
+    if setor.id == 1:
+        raise HTTPException(status_code=409, detail="O setor Vendas é necessário para distribuir atendimentos")
+    if (await db.execute(select(Usuario.id).where(Usuario.setor_interno_id == setor_id).limit(1))).first():
+        raise HTTPException(status_code=409, detail="Remova ou transfira os usuários vinculados antes de excluir")
+    if (await db.execute(select(MensagemGrupo.id).where(MensagemGrupo.setor_id == setor_id).limit(1))).first():
+        raise HTTPException(status_code=409, detail="Este setor possui mensagens no chat interno e não pode ser excluído")
+    if (await db.execute(select(LeituraInterna.id).where(
+        LeituraInterna.tipo == "grupo", LeituraInterna.alvo_id == setor_id
+    ).limit(1))).first():
+        raise HTTPException(status_code=409, detail="Este setor possui histórico de leitura e não pode ser excluído")
+    await db.delete(setor)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/simulador")
 async def configurar_simulador(
     request: Request,
@@ -104,6 +179,9 @@ async def criar_usuario(
 ):
     dados = await form(request)
     role = dados.get("role", "")
+    nome = " ".join(dados.get("nome", "").split())
+    if not 1 <= len(nome) <= 120:
+        raise HTTPException(status_code=422, detail="Nome deve ter de 1 a 120 caracteres")
     if role not in {"colaborador", "supervisor", "gestor"} or len(dados.get("senha", "")) < 8:
         raise HTTPException(status_code=422, detail="Papel ou senha inválidos")
     email = dados.get("email", "").strip().lower()
@@ -121,7 +199,7 @@ async def criar_usuario(
         raise HTTPException(status_code=422, detail="Setor interno inválido")
     db.add(
         Usuario(
-            nome=dados.get("nome", "").strip(),
+            nome=nome,
             email=email,
             senha_hash=get_password_hash(dados["senha"]),
             role=role,
@@ -156,7 +234,10 @@ async def editar_usuario(
         and (await db.execute(select(Usuario.id).where(Usuario.email == email))).first()
     ):
         raise HTTPException(status_code=409, detail="Email já existe")
-    usuario.nome = dados.get("nome", usuario.nome).strip()
+    nome = " ".join(dados.get("nome", usuario.nome).split())
+    if not 1 <= len(nome) <= 120:
+        raise HTTPException(status_code=422, detail="Nome deve ter de 1 a 120 caracteres")
+    usuario.nome = nome
     usuario.email = email
     usuario.role = role
     usuario.ativo = dados.get("ativo") == "on"
@@ -178,6 +259,28 @@ async def editar_usuario(
     return {"ok": True}
 
 
+@router.delete("/usuarios/{usuario_id}")
+async def excluir_usuario(
+    usuario_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UsuarioAtual = Depends(somente_gestor),
+):
+    usuario = await db.get(Usuario, usuario_id)
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    if usuario_id == user.user_id:
+        raise HTTPException(status_code=409, detail="Não é possível excluir sua própria conta")
+    # As referências compõem a auditoria. Excluir só é permitido antes do primeiro uso.
+    for tabela in Base.metadata.tables.values():
+        for coluna in tabela.columns:
+            if any(chave.target_fullname == "usuarios.id" for chave in coluna.foreign_keys):
+                if (await db.execute(select(coluna).where(coluna == usuario_id).limit(1))).first():
+                    raise HTTPException(status_code=409, detail="Usuário possui histórico ou vínculos. Desative a conta para preservar a auditoria")
+    await db.delete(usuario)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/setores/{setor_id}")
 async def configurar_setor(
     setor_id: int,
@@ -195,6 +298,12 @@ async def configurar_setor(
         raise HTTPException(status_code=422, detail="Nome do setor inválido")
     if icone not in ICONES_SETOR:
         raise HTTPException(status_code=422, detail="Ícone inválido")
+    ordem_texto = dados.get("ordem", str(setor.ordem))
+    if not ordem_texto.isdecimal() or int(ordem_texto) not in {1, 2, 3, 4}:
+        raise HTTPException(status_code=422, detail="Opção do menu inválida")
+    nova_ordem = int(ordem_texto)
+    if (setor.ordem == 1) != (nova_ordem == 1):
+        raise HTTPException(status_code=422, detail="A opção 1 é reservada a Vendas")
     if (
         nome != setor.nome
         and (await db.execute(select(Setor.id).where(Setor.nome == nome))).first()
@@ -209,6 +318,15 @@ async def configurar_setor(
     setor.nome = nome
     setor.icone = icone
     setor.responsavel_id = responsavel.id if responsavel else None
+    if nova_ordem != setor.ordem:
+        outro = (await db.execute(select(Setor).where(Setor.ordem == nova_ordem))).scalar_one_or_none()
+        if outro is None:
+            raise HTTPException(status_code=422, detail="Opção do menu não encontrada")
+        antiga_ordem = setor.ordem
+        await db.execute(update(Setor).where(Setor.id == setor.id).values(ordem=-setor.id))
+        await db.execute(update(Setor).where(Setor.id == outro.id).values(ordem=antiga_ordem))
+        await db.execute(update(Setor).where(Setor.id == setor.id).values(ordem=nova_ordem))
+        db.expire(setor)
     await db.commit()
     return {"ok": True}
 

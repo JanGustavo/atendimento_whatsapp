@@ -12,7 +12,7 @@ def test_link_meshcentral_usa_node_id_codificado():
     computador = Computador(nome="PC", grupo="empresa", mesh_node_id="node//abc+def")
     link = provider.link_acesso(computador)
     assert link.startswith("https://mesh.jangustavo.me/?")
-    assert parse_qs(urlparse(link).query) == {"node": ["node//abc+def"], "viewmode": ["11"]}
+    assert parse_qs(urlparse(link).query) == {"node": ["abc+def"], "viewmode": ["11"]}
 
 
 async def test_meshcentral_exige_node_id_e_preserva_regra_do_pc_do_dono(ambiente, monkeypatch):
@@ -55,9 +55,11 @@ async def test_meshcentral_exige_node_id_e_preserva_regra_do_pc_do_dono(ambiente
     resposta = await client.post(f"/api/chamados/{chamados_ids[0]}/acessos")
     assert resposta.status_code == 200
     assert resposta.json()["resultado"] == "pendente"
-    assert resposta.json()["acesso_url"] is None
+    assert parse_qs(urlparse(resposta.json()["acesso_url"]).query) == {
+        "node": ["abc"], "viewmode": ["11"]
+    }
     lista = (await client.get("/api/chamados")).json()
-    assert next(item for item in lista if item["id"] == chamados_ids[0])["acessos"][0]["acesso_url"] is None
+    assert next(item for item in lista if item["id"] == chamados_ids[0])["acessos"][0]["acesso_url"] == resposta.json()["acesso_url"]
     async with maker() as db:
         acessos = (await db.execute(select(AcessoRemoto))).scalars().all()
         assert len(acessos) == 1

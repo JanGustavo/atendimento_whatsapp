@@ -102,6 +102,37 @@ async def test_inicio_fim_repetidos_sao_idempotentes_e_ligados_ao_chamado(ambien
         assert sessao.inicio_em is not None
 
 
+async def test_evento_nativo_confirma_e_encerra_pedido_sem_aceite_no_painel(ambiente):
+    _client, maker = ambiente
+    _pc_id, _chamado_id, acesso_id = await preparar(maker)
+    async with maker() as db:
+        acesso = await db.get(AcessoRemoto, acesso_id)
+        acesso.resultado = "pendente"
+        acesso.autorizado_em = None
+        acesso.respondido_por_id = None
+        acesso.respondido_em = None
+        acesso.expira_em = now() + timedelta(minutes=5)
+        await db.commit()
+
+    inicio = evento(sessao="relay-nativo", momento=now())
+    fim = evento(msgid=11, sessao="relay-nativo", momento=now() + timedelta(seconds=20))
+    async with maker() as db:
+        await registrar_evento(db, inicio)
+        await db.commit()
+        acesso = await db.get(AcessoRemoto, acesso_id)
+        sessao = (await db.execute(select(SessaoMeshCentral).where(
+            SessaoMeshCentral.mesh_session_id == "relay-nativo"
+        ))).scalar_one()
+        assert acesso.resultado == "aceito" and acesso.autorizado_por_id is None
+        assert sessao.acesso_id == acesso_id
+
+    async with maker() as db:
+        await registrar_evento(db, fim)
+        await db.commit()
+        acesso = await db.get(AcessoRemoto, acesso_id)
+        assert acesso.resultado == "encerrado" and acesso.fim_em is not None
+
+
 async def test_replay_fora_de_ordem_nao_reativa_sessao(ambiente):
     _client, maker = ambiente
     await preparar(maker)

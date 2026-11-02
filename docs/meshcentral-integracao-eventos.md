@@ -51,6 +51,15 @@ Fontes upstream:
    `https://meshcentral:444`, com `Origin Server Name` igual a
    `mesh.jangustavo.me`, `CA Pool` em
    `/meshcentral-certs/root-cert-public.crt` e verificação TLS ativa.
+   No domínio padrão (`domains[""]`) do `config.json`, configure também
+   `certUrl="https://mesh-agent.jangustavo.me/"`. O MeshCentral precisa
+   reconhecer o certificado público apresentado pela Cloudflare aos agentes;
+   sem isso, registra `Agent bad web cert hash` e não mostra o dispositivo.
+   Após reiniciar, confira no log `Loaded web certificate` e compare o hash
+   SHA384 com `Agent reported web cert hash`. Mantenha a verificação de hash
+   ativa. A Cloudflare pode trocar o certificado público; se os agentes
+   perderem conexão após uma troca, confira esses hashes e reinicie o
+   MeshCentral para recarregar `certUrl`.
    A porta 444 aceita apenas agentes; ela não oferece a interface de
    administração. Não crie bypass para `mesh.jangustavo.me`. A rota do
    agente precisa ser validada com um PC real antes de considerá-la pronta.
@@ -117,9 +126,11 @@ horário de início e término observado, estado e consentimento relacionado
 
 - o nó for idêntico ao `mesh_node_id` cadastrado;
 - o `userid` for igual ao `mesh_user_id` de um técnico ativo;
-- esse técnico for o solicitante do consentimento autorizado para o PC;
-- o relay iniciar após autorização, em até 30 minutos, com a autorização
-  ainda aberta.
+- esse técnico for o solicitante do pedido para o PC;
+- o relay iniciar durante os cinco minutos de validade do pedido. Ao observar
+  o início, o pedido muda para `aceito`; ao observar o fim, muda para
+  `encerrado`. Autorizações antigas do painel continuam correlacionáveis por
+  até 30 minutos após o aceite.
 
 Eventos duplicados são idempotentes. Um evento de fim recebido antes do
 início deixa registro encerrado e não é reaberto durante replay. O estado
@@ -133,9 +144,12 @@ monitor, o painel avisa que o estado pode estar desatualizado.
   Fechar autorização/chamado na FortGiro continua sem revogar uma conexão
   MeshCentral já ativa. A barra de privacidade/consentimento **nativos do
   agente** são fundamentais.
-- A autorização React e a autorização nativa do MeshCentral são
-  **independentes**. Não afirmar que a conta MeshCentral obedece ao fluxo
-  de chamados sem configurar e testar uma camada de política de sessão.
+- No modo MeshCentral, o React registra o pedido; o único aceite é o aviso
+  nativo no computador. A conta MeshCentral ainda pode ter permissões próprias
+  fora do fluxo de chamados. Restrinja essas contas no servidor.
+- Neste ambiente, `MESHCENTRAL_EVENT_MONITOR=false` e a conta de auditoria não
+  está configurada. O histórico FortGiro mostra pedidos, mas ainda não
+  comprova automaticamente início ou fim das sessões reais.
 - O monitor recebe somente os eventos visíveis à conta de auditoria. Não há
   prova de completude em uma queda prolongada ou após mais de 2.000 eventos.
   Uma conciliação periódica pelo estado de sessões do servidor deve ser

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ModalImagem from './ModalImagem.jsx'
+import { PapelParede } from './Interno.jsx'
 import { requisitar as fetchApi } from './api.js'
 
 const FOTO_TIPOS_ACEITOS = ['image/png', 'image/jpeg', 'image/webp']
@@ -94,7 +95,7 @@ function FotoPerfil({ me, onEnviarFoto, onVisualizarFoto }) {
           disabled={!envioDisponivel || enviando}
           onClick={() => entrada.current?.click()}
         >
-          Anexar foto
+          Alterar foto
         </button>
         <small className="perfil-dica">
           {envioDisponivel ? `PNG, JPG ou WebP, até ${FOTO_TAMANHO_MAX_MB} MB.` : 'Envio de foto disponível em breve.'}
@@ -112,16 +113,18 @@ function FotoPerfil({ me, onEnviarFoto, onVisualizarFoto }) {
   )
 }
 
-export default function Perfil({ me, onEnviarFoto, onVisualizarFoto }) {
+export default function Perfil({ me, onEnviarFoto, onVisualizarFoto, papelParede, opacidadePapelParede, tomPapelParede, onPapelParede, onOpacidadePapelParede, onTomPapelParede, somenteLeitura }) {
   const [senhaAtual, setSenhaAtual] = useState('')
   const [senhaNova, setSenhaNova] = useState('')
   const [confirmacao, setConfirmacao] = useState('')
   const [aviso, setAviso] = useState('')
   const [erro, setErro] = useState('')
   const [busy, setBusy] = useState(false)
+  const [mostrarSenha, setMostrarSenha] = useState(false)
 
   async function salvar(evento) {
     evento.preventDefault()
+    if (somenteLeitura) return
     setErro('')
     setAviso('')
     if (senhaNova !== confirmacao) {
@@ -162,7 +165,7 @@ export default function Perfil({ me, onEnviarFoto, onVisualizarFoto }) {
       </div>
       <div className="perfil-grid">
         <section className="surface perfil-card perfil-identidade" aria-label="Dados da conta">
-          <FotoPerfil me={me} onEnviarFoto={onEnviarFoto} onVisualizarFoto={onVisualizarFoto} />
+          <FotoPerfil me={me} onEnviarFoto={somenteLeitura ? null : onEnviarFoto} onVisualizarFoto={onVisualizarFoto} />
           <div className="perfil-dados">
             <strong>{me.nome}</strong>
             <span className="badge badge-neutral perfil-papel">{me.role}</span>
@@ -176,7 +179,7 @@ export default function Perfil({ me, onEnviarFoto, onVisualizarFoto }) {
             <label className="perfil-campo-largo">
               Senha atual
               <input
-                type="password"
+                type={mostrarSenha ? 'text' : 'password'}
                 autoComplete="current-password"
                 value={senhaAtual}
                 onChange={(e) => setSenhaAtual(e.target.value)}
@@ -186,7 +189,7 @@ export default function Perfil({ me, onEnviarFoto, onVisualizarFoto }) {
             <label>
               Nova senha
               <input
-                type="password"
+                type={mostrarSenha ? 'text' : 'password'}
                 autoComplete="new-password"
                 minLength="8"
                 value={senhaNova}
@@ -197,7 +200,7 @@ export default function Perfil({ me, onEnviarFoto, onVisualizarFoto }) {
             <label>
               Confirmar nova senha
               <input
-                type="password"
+                type={mostrarSenha ? 'text' : 'password'}
                 autoComplete="new-password"
                 minLength="8"
                 value={confirmacao}
@@ -205,6 +208,7 @@ export default function Perfil({ me, onEnviarFoto, onVisualizarFoto }) {
                 required
               />
             </label>
+            <label className="perfil-mostrar-senha"><input type="checkbox" checked={mostrarSenha} onChange={e => setMostrarSenha(e.target.checked)} /> Mostrar senhas</label>
             {erro && (
               <p className="form-error perfil-feedback" role="alert">
                 {erro}
@@ -216,13 +220,14 @@ export default function Perfil({ me, onEnviarFoto, onVisualizarFoto }) {
               </p>
             )}
             <div className="perfil-acoes">
-              <button className="button button-primary" disabled={busy}>
+              <button className="button button-primary" disabled={busy || somenteLeitura}>
                 Alterar senha
               </button>
             </div>
           </form>
         </section>
       </div>
+      <PapelParede valor={papelParede} opacidade={opacidadePapelParede} tom={tomPapelParede} onChange={onPapelParede} onOpacidade={onOpacidadePapelParede} onTom={onTomPapelParede} />
     </div>
   )
 }

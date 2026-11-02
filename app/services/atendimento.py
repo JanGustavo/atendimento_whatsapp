@@ -9,16 +9,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.utils import now
-from app.models import Atribuicao, Conversa, Mensagem, Setor, Usuario
+from app.models import Atribuicao, ConfiguracaoBot, Conversa, Mensagem, Setor, Usuario
 from app.providers import MensagemEntrada, WhatsAppProvider
 from app.services.chatbot import MENU_SETOR, processar_mensagem
 
 
-def em_expediente(instante: datetime) -> bool:
+async def configuracao_bot(db: AsyncSession) -> dict:
     config = get_settings()
-    horario = instante.replace(tzinfo=UTC).astimezone(ZoneInfo(config.expediente_fuso)).time()
-    inicio = time.fromisoformat(config.expediente_inicio)
-    fim = time.fromisoformat(config.expediente_fim)
+    salva = await db.get(ConfiguracaoBot, 1)
+    return {
+        "horarios": salva.horarios if salva else {
+            str(dia): {"ativo": True, "inicio": config.expediente_inicio, "fim": config.expediente_fim}
+            for dia in range(7)
+        },
+        "dias_fechados": salva.dias_fechados if salva else [],
+        "mensagem_fora_expediente": salva.mensagem_fora_expediente if salva else config.mensagem_fora_expediente,
+        "mensagem_reabertura": salva.mensagem_reabertura if salva else config.mensagem_reabertura,
+        "mensagem_standby": salva.mensagem_standby if salva else config.mensagem_standby,
+    }
+
+
+async def em_expediente(db: AsyncSession, instante: datetime, agenda: dict | None = None) -> bool:
+    config = get_settings()
+    local = instante.replace(tzinfo=UTC).astimezone(ZoneInfo(config.expediente_fuso))
+    agenda = agenda or await configuracao_bot(db)
+    if local.date().isoformat() in agenda["dias_fechados"]:
+        return False
+    periodo = agenda["horarios"].get(str(local.weekday()), {})
+    if not periodo.get("ativo"):
+        return False
+    inicio = time.fromisoformat(periodo["inicio"])
+    fim = time.fromisoformat(periodo["fim"])
+    horario = local.time()
     return inicio <= horario < fim if inicio < fim else horario >= inicio or horario < fim
 
 
@@ -235,11 +257,12 @@ async def receber_mensagem(
     # Uma nova mensagem traz de volta uma conversa arquivada sem reiniciar o bot.
     conversa.arquivada_em = None
     conversa.arquivada_por_id = None
-    if conversa.primeira_resposta_em is None and not em_expediente(now()):
+    agenda = await configuracao_bot(db)
+    if conversa.primeira_resposta_em is None and not await em_expediente(db, now(), agenda):
         if conversa.etapa != "fora_expediente":
             conversa.etapa = "fora_expediente"
             conversa.timer_prazo_em = None
-            await _registrar_bot(db, conversa, get_settings().mensagem_fora_expediente, provider)
+            await _registrar_bot(db, conversa, agenda["mensagem_fora_expediente"], provider)
         await db.commit()
         return
     if conversa.etapa == "fora_expediente":
@@ -348,7 +371,8 @@ async def receber_mensagem(
 async def verificar_timers(db: AsyncSession, provider: WhatsAppProvider) -> None:
     config = get_settings()
     instante = now()
-    if em_expediente(instante):
+    agenda = await configuracao_bot(db)
+    if await em_expediente(db, instante, agenda):
         pendentes = (
             (
                 await db.execute(
@@ -383,7 +407,7 @@ async def verificar_timers(db: AsyncSession, provider: WhatsAppProvider) -> None
                 await _registrar_bot(
                     db,
                     conversa,
-                    config.mensagem_reabertura + "\n" + await menu_setores(db),
+                    agenda["mensagem_reabertura"] + "\n" + await menu_setores(db),
                     provider,
                 )
     else:
@@ -456,7 +480,7 @@ async def verificar_timers(db: AsyncSession, provider: WhatsAppProvider) -> None
                     .values(etapa="standby", timer_prazo_em=None)
                 )
                 if resultado.rowcount:
-                    await _registrar_bot(db, conversa, config.mensagem_standby, provider)
+                    await _registrar_bot(db, conversa, agenda["mensagem_standby"], provider)
                 continue
             proximo = await proximo_disponivel(db, excluir_id=conversa.atribuido_id)
             if proximo is None:
@@ -471,7 +495,7 @@ async def verificar_timers(db: AsyncSession, provider: WhatsAppProvider) -> None
                     .values(etapa="standby", timer_prazo_em=None)
                 )
                 if resultado.rowcount:
-                    await _registrar_bot(db, conversa, config.mensagem_standby, provider)
+                    await _registrar_bot(db, conversa, agenda["mensagem_standby"], provider)
                 continue
             await _atribuir(db, conversa, proximo, "timer", "aviso_transferencia", provider)
     await db.commit()

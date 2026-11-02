@@ -24,7 +24,9 @@ from app.models import (
     Usuario,
 )
 from app.providers import CLIENTES, provider_atual
+from app.services.atendimento import configuracao_bot, em_expediente
 from app.services.media import caminho_media, foto_url, guardar_webp
+from app.services.presenca import esta_conectado
 
 router = APIRouter(prefix="/api")
 
@@ -94,6 +96,11 @@ async def registrar_presenca(db: AsyncSession = Depends(get_db), user: UsuarioAt
     usuario.ultima_atividade_em = now()
     await db.commit()
     return {"online": True}
+
+
+@router.get("/operacao-status")
+async def operacao_status(db: AsyncSession = Depends(get_db), user: UsuarioAtual = Depends(get_current_user)):
+    return {"em_expediente": await em_expediente(db, now())}
 
 
 @router.post("/me/foto")
@@ -324,8 +331,11 @@ async def configuracao_gestor(
         (await db.execute(select(SetorInterno).order_by(SetorInterno.nome))).scalars().all()
     )
     simulador = await db.get(SimuladorEstado, 1)
+    agenda = await configuracao_bot(db)
     return {
+        "configuracao_bot": agenda,
         "simulador_ativo": bool(get_settings().enable_simulator and simulador and simulador.ativo),
+        "simulador_disponivel": get_settings().enable_simulator,
         "setores_internos": [{"id": item.id, "nome": item.nome, "icone": item.icone} for item in setores_internos],
         "usuarios": [
             {
@@ -335,7 +345,7 @@ async def configuracao_gestor(
                 "email": item.email,
                 "role": item.role,
                 "ativo": item.ativo,
-                "online": item.online,
+                "online": esta_conectado(item),
                 "setor_interno_id": item.setor_interno_id,
             }
             for item in usuarios
@@ -396,8 +406,10 @@ async def dados_simulador(
 
 
 @router.get("/gestor/whatsapp-status")
-async def whatsapp_status(user: UsuarioAtual = Depends(somente_gestor)):
+async def whatsapp_status(user: UsuarioAtual = Depends(somente_gestor), db: AsyncSession = Depends(get_db)):
     config = get_settings()
+    ultimo_evento = await db.scalar(select(func.max(Mensagem.criada_em)))
+    resumo = {"ultimo_evento_em": ultimo_evento.isoformat()} if ultimo_evento else {}
     if config.whatsapp_provider == "meta" and not config.meta_app_secret:
-        return {"status": "webhook sem chave"}
-    return {"status": await provider_atual().status()}
+        return {"status": "webhook sem chave", **resumo}
+    return {"status": await provider_atual().status(), **resumo}

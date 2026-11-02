@@ -1,13 +1,19 @@
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Chamados, { ChamadosVendedor } from './Chamados.jsx'
-import { messageDay } from './dates.js'
-import Interno, { Icone, PapelParede, lerPapelParede } from './Interno.jsx'
+import { messageDay, messageDateTime, readDateTime } from './dates.js'
+import { formatPhone } from './phones.js'
+import { copiarTexto } from './clipboard.js'
+import Interno, { Icone, PAPEL_PAREDE_OPACIDADE, PAPEL_PAREDE_TOM, lerPapelParede, salvarPapelParede } from './Interno.jsx'
 import Perfil from './Perfil.jsx'
 import ModalImagem from './ModalImagem.jsx'
 import { converterWebp } from './images.js'
+import { feriadosNacionais } from './feriados.js'
 import { requisitar as fetchApi, obterJSON as getJSON, enviarFormulario as postForm } from './api.js'
 
 const roleName = { gestor: 'Gestor', supervisor: 'Supervisor', colaborador: 'Colaborador' }
+const nomeDemonstracao = (tipo, id) => `${tipo} ${String(id || 1).padStart(2, '0')}`
+const usuarioDemonstracao = usuario => usuario && ({ ...usuario, nome: nomeDemonstracao(({ gestor: 'Gestor', supervisor: 'Supervisor' })[usuario.role] || 'Colaborador', usuario.id), email: `usuario${usuario.id}@exemplo.test`, foto_url: null })
+const conversaDemonstracao = conversa => conversa && ({ ...conversa, numero: nomeDemonstracao('Cliente', conversa.id), nome_contato: 'Contato fictício', foto_url: null, atribuido_nome: conversa.atribuido_id ? nomeDemonstracao('Colaborador', conversa.atribuido_id) : null })
 const stageName = {
   menu_setor: 'Escolhendo setor',
   menu_vendedor: 'Escolhendo vendedor',
@@ -28,7 +34,6 @@ const routeByPage = {
 const pageByRoute = Object.fromEntries(
   Object.entries(routeByPage).map(([page, route]) => [route, page]),
 )
-const PAPEL_PAREDE_WPP = 'fortgiro.whatsapp.papel-parede'
 const SETOR_ICONES = [
   ['equipe', 'Equipe'], ['vendas', 'Vendas'], ['estoque', 'Estoque'],
   ['garantia', 'Garantia'], ['devolucao', 'Devolução'],
@@ -36,11 +41,25 @@ const SETOR_ICONES = [
 ]
 
 function SeletorIcone({ valor, onChange }) {
-  return <label className="manager-icon-picker">Ícone
-    <span><Icone nome={valor} tamanho={18} /><select value={valor} onChange={evento => onChange(evento.target.value)} aria-label="Ícone do setor">
-      {SETOR_ICONES.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
-    </select></span>
-  </label>
+  const [aberto, setAberto] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!aberto) return
+    const fechar = evento => {
+      if (evento.key === 'Escape' || (evento.type === 'pointerdown' && !ref.current?.contains(evento.target))) setAberto(false)
+    }
+    document.addEventListener('pointerdown', fechar)
+    document.addEventListener('keydown', fechar)
+    return () => { document.removeEventListener('pointerdown', fechar); document.removeEventListener('keydown', fechar) }
+  }, [aberto])
+  return <div className="manager-icon-picker" ref={ref}><span>Ícone</span>
+    <button type="button" className="manager-icon-trigger" aria-label="Escolher ícone do setor" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>
+      <Icone nome={valor} tamanho={18} />{SETOR_ICONES.find(item => item[0] === valor)?.[1] || 'Equipe'} <span aria-hidden="true">⌄</span>
+    </button>
+    {aberto && <div className="manager-icon-menu" role="group" aria-label="Ícones do setor">
+      {SETOR_ICONES.map(([id, nome]) => <button key={id} type="button" className={id === valor ? 'is-selected' : ''} aria-label={nome} aria-pressed={id === valor} title={nome} onClick={() => { onChange(id); setAberto(false) }}><Icone nome={id} tamanho={21} /><small>{nome}</small></button>)}
+    </div>}
+  </div>
 }
 
 function allowedPage(page, role) {
@@ -59,19 +78,13 @@ function initialPage(role) {
 }
 
 function time(value) {
-  if (!value) return ''
-  const date = new Date(value.endsWith('Z') ? value : `${value}Z`)
-  return Number.isNaN(date.getTime())
-    ? ''
-    : date.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
+  return messageDateTime(value)
 }
 
 function initials(name = '') {
+  const partes = name.split(/\s+/).filter(Boolean)
+  const numero = partes.at(-1)?.match(/^0*(\d+)$/)
+  if (numero) return `${partes[0]?.[0]?.toUpperCase() || 'C'}${numero[1]}`
   return (
     name
       .split(/\s+/)
@@ -147,6 +160,8 @@ function Icon({ name, size = 19 }) {
     arrow: <path d="m5 12 14 0m-6-6 6 6-6 6" />,
     clip: <path d="m21.5 11.5-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
     mic: <><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8" /></>,
+    copy: <><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h2" /></>,
+    options: <path d="m7 10 5 5 5-5" />,
     fechar: <path d="M18 6 6 18M6 6l12 12" />,
     ticket: (
       <>
@@ -263,6 +278,9 @@ function MessageBubbles({ messages, simulator = false, onRetry, onEdit, onDiscar
   const bottom = React.useRef(null)
   const [editId, setEditId] = useState(null)
   const [editText, setEditText] = useState('')
+  const [menuId, setMenuId] = useState(null)
+  const [copiaStatus, setCopiaStatus] = useState('')
+  useEffect(() => { if (!copiaStatus) return undefined; const id = setTimeout(() => setCopiaStatus(''), 2400); return () => clearTimeout(id) }, [copiaStatus])
   const colado = useRef(true)
   const montado = useRef(false)
   const total = useRef(0)
@@ -358,10 +376,16 @@ function MessageBubbles({ messages, simulator = false, onRetry, onEdit, onDiscar
                         lida: '✓✓ Lida',
                         falhou: 'Falhou',
                       }[message.envio_status] || 'Pendente'}
-                      {message.lida_em ? ` às ${time(message.lida_em)}` : ''}
+                      {message.lida_em ? ` às ${readDateTime(message.lida_em)}` : ''}
                     </span>
                   )}
                 </time>
+                {!simulator && message.texto && editId !== message.id && <div className="int-message-options">
+                  <button type="button" className="int-message-menu-trigger" aria-label="Opções da mensagem" aria-expanded={menuId === message.id} onClick={() => setMenuId(menuId === message.id ? null : message.id)}><Icon name="options" size={15} /></button>
+                  {menuId === message.id && <div className="int-message-menu">
+                    <button type="button" title="Copiar mensagem" aria-label="Copiar mensagem" onClick={async () => { const ok = await copiarTexto(message.texto); setCopiaStatus(ok ? 'Mensagem copiada.' : 'Não foi possível copiar.'); setMenuId(null) }}><Icon name="copy" size={17} /></button>
+                  </div>}
+                </div>}
                 {!simulator &&
                   message.origem === 'humano' &&
                   message.envio_status === 'falhou' &&
@@ -381,6 +405,7 @@ function MessageBubbles({ messages, simulator = false, onRetry, onEdit, onDiscar
         )
       })}
       <div ref={bottom} />
+      {copiaStatus && <div className="copy-feedback" role="status" onClick={() => setCopiaStatus('')}>{copiaStatus}</div>}
     </div>
   )
 }
@@ -426,6 +451,8 @@ function Inbox({
   onTransfer,
   onUploadPhoto,
   onImagem,
+  papelParede,
+  opacidadePapelParede,
   busy,
 }) {
   const [draft, setDraft] = useState('')
@@ -440,9 +467,6 @@ function Inbox({
   const [segundosGravacao, setSegundosGravacao] = useState(0)
   const [anexosAbertos, setAnexosAbertos] = useState(false)
   const [previaWpp, setPreviaWpp] = useState(null)
-  const [papelParede, setPapelParede] = useState(() => lerPapelParede(PAPEL_PAREDE_WPP))
-  const [papelParedeValido, setPapelParedeValido] = useState('')
-  const [erroPapelParede, setErroPapelParede] = useState('')
   const destinoRef = useRef(null)
   const fotoRef = useRef(null)
   const arquivoWppRef = useRef(null)
@@ -457,14 +481,6 @@ function Inbox({
   useEffect(() => setDestino(''), [selectedId])
   useEffect(() => { setImagemWpp(null); setPreviaWpp(null) }, [selectedId])
   useEffect(() => setAnexosAbertos(false), [selectedId])
-  useEffect(() => {
-    if (!papelParede) { setPapelParedeValido(''); return undefined }
-    const imagem = new Image()
-    imagem.onload = () => setPapelParedeValido(papelParede)
-    imagem.onerror = () => { setPapelParedeValido(''); setErroPapelParede('Não foi possível carregar o papel de parede.') }
-    imagem.src = papelParede
-    return () => { imagem.onload = null; imagem.onerror = null }
-  }, [papelParede])
   useEffect(() => {
     if (!gravando) return undefined
     const intervalo = window.setInterval(() => setSegundosGravacao((valor) => valor + 1), 1000)
@@ -508,13 +524,13 @@ function Inbox({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const tipo = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'].find((item) => MediaRecorder.isTypeSupported(item))
-      if (!tipo) { stream.getTracks().forEach((track) => track.stop()); window.alert('Formato de gravação não suportado. Anexe um arquivo MP3 ou OGG.'); return }
+      if (!tipo) { stream.getTracks().forEach((track) => { track.stop() }); window.alert('Formato de gravação não suportado. Anexe um arquivo MP3 ou OGG.'); return }
       const gravador = new MediaRecorder(stream, { mimeType: tipo })
       const partes = []
       const conversaId = selected.id
       gravador.ondataavailable = (event) => { if (event.data.size) partes.push(event.data) }
       gravador.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop())
+        stream.getTracks().forEach((track) => { track.stop() })
         gravadorRef.current = null
         setGravando(false)
         if (cancelarGravacaoRef.current) { cancelarGravacaoRef.current = false; return }
@@ -660,7 +676,7 @@ function Inbox({
                   >
                     <AvatarContato nome={conversa.nome_contato} fotoUrl={conversa.foto_url} />
                     <span className="conversation-item-main">
-                      <strong className="atendimento-numero">{conversa.numero}</strong>
+                      <strong className="atendimento-numero">{formatPhone(conversa.numero)}</strong>
                       <small className="atendimento-contato">{conversa.nome_contato || 'Contato sem nome salvo'}</small>
                       <AtendimentoTags conversa={conversa} />
                       {conversa.etapa && stageName[conversa.etapa] && (
@@ -709,12 +725,10 @@ function Inbox({
           </div>
         )}
       </aside>
-      <section className="chat-pane" aria-label="Conversa selecionada" style={papelParedeValido ? {
-        '--wpp-wallpaper': `url("${papelParedeValido}")`,
+      <section className="chat-pane" aria-label="Conversa selecionada" style={papelParede ? {
+        '--wpp-wallpaper': `linear-gradient(rgba(0,0,0,${opacidadePapelParede}),rgba(0,0,0,${opacidadePapelParede})), url("${papelParede}")`,
         '--wpp-wallpaper-size': 'cover',
       } : undefined}>
-        <PapelParede valor={papelParede} onChange={setPapelParede} onErro={setErroPapelParede} chave={PAPEL_PAREDE_WPP} />
-        {erroPapelParede && <div className="wpp-wallpaper-toast" role="alert">{erroPapelParede}<button type="button" onClick={() => setErroPapelParede('')} aria-label="Fechar aviso">×</button></div>}
         {!temSelecao ? (
           <div className="chat-placeholder">
             <div className="placeholder-mark">
@@ -742,7 +756,7 @@ function Inbox({
                 {botaoVoltar}
                 <AvatarContato nome={selected.nome_contato} fotoUrl={selected.foto_url} grande />
                 <div className="atendimento-titulo">
-                  <h3>{selected.numero}</h3>
+                  <h3>{formatPhone(selected.numero)}</h3>
                   <small className="atendimento-contato">{selected.nome_contato || 'Contato sem nome salvo'}</small>
                   <AtendimentoTags conversa={selected} />
                 </div>
@@ -757,7 +771,7 @@ function Inbox({
             </div>
             <div className="chat-stage atendimento-stage">
               <span className="atendimento-chip">
-                Etapa: {stageName[selected.etapa] || selected.etapa}
+                {stageName[selected.etapa] || selected.etapa}
               </span>
               {atual.mensagens.some((item) => item.origem === 'cliente') && (
                 <span
@@ -765,7 +779,7 @@ function Inbox({
                 >
                   {atual.visualizada_pelo_atendente_em
                     ? `Última mensagem vista pelo atendente em ${time(atual.visualizada_pelo_atendente_em)}`
-                    : 'Última mensagem ainda não visualizada pelo atendente'}
+                    : 'Cliente aguardando resposta'}
                 </span>
               )}
               {selected.timer_prazo_em && !selected.primeira_resposta_em && (
@@ -838,13 +852,13 @@ function Inbox({
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' && draft.trim().toLowerCase() === '/transferir') {
+                      if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && draft.trim().toLowerCase() === '/transferir') {
                         event.preventDefault()
                         setDraft('')
                         destinoRef.current?.focus()
                         return
                       }
-                      if (event.key === 'Enter' && (event.ctrlKey || event.shiftKey)) {
+                      if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.nativeEvent.isComposing) {
                         event.preventDefault()
                         if (!busy && (draft.trim() || imagemWpp)) event.currentTarget.form?.requestSubmit()
                       }
@@ -866,7 +880,7 @@ function Inbox({
                   </button> : <button type="button" className={`atendimento-mic ${gravando ? 'gravando-audio' : ''}`} onClick={alternarGravacao} disabled={busy || janelaBloqueada} aria-label={gravando ? 'Parar e enviar gravação' : 'Gravar áudio'} title={gravando ? 'Parar e enviar gravação' : 'Gravar áudio'}><Icon name="mic" size={20} /></button>}
                 </form>
                 <small className="composer-hint" id="atendimento-dica">
-                  Ctrl+Enter ou Shift+Enter para enviar · /transferir para escolher destino
+                  Enter envia · Shift+Enter quebra linha · /transferir escolhe destino
                 </small>
                 <div className="atendimento-acoes">
                   <div className="transfer-controls">
@@ -887,7 +901,7 @@ function Inbox({
                     </label>
                     <button
                       type="button"
-                      className="button button-soft"
+                      className="button button-warning"
                       disabled={busy || !destino}
                       onClick={async () => {
                         const alvo = selected.id
@@ -900,13 +914,13 @@ function Inbox({
                   </div>
                   <button
                     type="button"
-                    className="text-button atendimento-encerrar"
+                    className="button button-danger atendimento-encerrar"
                     disabled={busy}
-                    onClick={() => onClose(selected.id)}
+                    onClick={() => { if (window.confirm('Encerrar esta conversa?')) onClose(selected.id) }}
                   >
                     Encerrar conversa
                   </button>
-                  <button type="button" className="text-button" disabled={busy} onClick={() => onArchive(selected.id, !selected.arquivada)}>
+                  <button type="button" className="button button-neutral" disabled={busy} onClick={() => onArchive(selected.id, !selected.arquivada)}>
                     {selected.arquivada ? 'Desarquivar' : 'Arquivar'}
                   </button>
                 </div>
@@ -926,7 +940,7 @@ function Inbox({
   )
 }
 
-function UserEditor({ user, setoresInternos, onSave, busy }) {
+function UserEditor({ user, setoresInternos, onSave, onDelete, currentUserId, busy }) {
   const [value, setValue] = useState({ ...user, senha: '' })
   const [aberto, setAberto] = useState(false)
   return (
@@ -937,7 +951,7 @@ function UserEditor({ user, setoresInternos, onSave, busy }) {
         <td>{roleName[value.role]}</td>
         <td>{setoresInternos.find(item => item.id === Number(value.setor_interno_id))?.nome || '—'}</td>
         <td><span className={`manager-state ${value.ativo ? 'is-active' : ''}`}>{value.ativo ? 'Ativo' : 'Inativo'}</span></td>
-        <td><button type="button" className="button button-soft" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button></td>
+        <td><div className="manager-row-actions"><button type="button" className="button button-edit" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button><button type="button" className="button button-danger" disabled={busy || user.id === currentUserId} title={user.id === currentUserId ? 'Não é possível excluir sua própria conta' : 'Exclui apenas contas sem histórico; caso contrário, desative'} onClick={() => { if (window.confirm(`Excluir ${user.nome}? Contas com histórico devem ser desativadas para preservar a auditoria.`)) onDelete(user.id) }}>Excluir</button></div></td>
       </tr>
       {aberto && <tr className="manager-detail-row"><td colSpan="6"><form className="manager-edit-grid" onSubmit={async evento => {
         evento.preventDefault()
@@ -950,7 +964,7 @@ function UserEditor({ user, setoresInternos, onSave, busy }) {
         <label>Redefinir senha<input type="password" placeholder="Deixe em branco para manter" minLength="8" value={value.senha} onChange={evento => setValue({ ...value, senha: evento.target.value })} /></label>
         <label className="switch-line"><input type="checkbox" checked={value.ativo} onChange={evento => setValue({ ...value, ativo: evento.target.checked })} />Ativo</label>
         <label className="switch-line"><input type="checkbox" checked={value.online} onChange={evento => setValue({ ...value, online: evento.target.checked })} />Disponível</label>
-        <button className="button button-primary" disabled={busy}>Salvar alterações</button>
+        <button className="button button-success" disabled={busy}>Salvar alterações</button>
       </form></td></tr>}
     </Fragment>
   )
@@ -960,20 +974,23 @@ function SectorEditor({ sector, users, onSave, busy }) {
   const [nome, setNome] = useState(sector.nome)
   const [responsavel, setResponsavel] = useState(sector.responsavel_id || '')
   const [icone, setIcone] = useState(sector.icone || 'equipe')
+  const [ordem, setOrdem] = useState(sector.ordem)
   const [aberto, setAberto] = useState(false)
+  useEffect(() => setOrdem(sector.ordem), [sector.ordem])
   return (
     <Fragment>
       <tr>
         <td><div className="manager-contact"><span className="manager-sector-icon"><Icone nome={icone} tamanho={20} /></span><div><strong>{nome}</strong><small>Opção {sector.ordem} do menu</small></div></div></td>
-        <td>{SETOR_ICONES.find(item => item[0] === icone)?.[1]}</td>
+        <td><Icone nome={icone} tamanho={20} /></td>
         <td>{sector.ordem === 1 ? 'Distribuição entre vendedores' : users.find(item => item.id === Number(responsavel))?.nome || 'Sem responsável'}</td>
-        <td><button type="button" className="button button-soft" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button></td>
+        <td><button type="button" className="button button-edit" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button></td>
       </tr>
       {aberto && <tr className="manager-detail-row"><td colSpan="4"><form className="manager-edit-grid" onSubmit={async evento => {
         evento.preventDefault()
-        if (await onSave(sector.id, { nome, icone, responsavel_id: responsavel })) setAberto(false)
+        if (await onSave(sector.id, { nome, icone, ordem, responsavel_id: responsavel })) setAberto(false)
       }}>
         <label>Nome<input aria-label={`Nome do setor ${sector.ordem}`} value={nome} onChange={evento => setNome(evento.target.value)} required /></label>
+        <label>Opção no menu<select aria-label={`Opção no menu para ${sector.nome}`} value={ordem} onChange={evento => setOrdem(Number(evento.target.value))}>{sector.ordem === 1 ? <option value={1}>1 · {sector.nome}</option> : [2, 3, 4].map(numero => <option key={numero} value={numero}>{numero} · {sector.nome}</option>)}</select></label>
         <SeletorIcone valor={icone} onChange={setIcone} />
         {sector.ordem !== 1 && <label>Responsável<select aria-label={`Responsável pelo setor ${sector.ordem}`} value={responsavel} onChange={evento => setResponsavel(evento.target.value)}><option value="">Selecionar supervisor</option>{users.filter(item => item.role === 'supervisor' && item.ativo).map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></label>}
         <button className="button button-primary" disabled={busy}>Salvar</button>
@@ -982,7 +999,7 @@ function SectorEditor({ sector, users, onSave, busy }) {
   )
 }
 
-function InternalSectorEditor({ sector, membros, onSave, busy }) {
+function InternalSectorEditor({ sector, membros, vinculados, onSave, onDelete, busy }) {
   const [nome, setNome] = useState(sector.nome)
   const [icone, setIcone] = useState(sector.icone || 'equipe')
   const [aberto, setAberto] = useState(false)
@@ -993,7 +1010,7 @@ function InternalSectorEditor({ sector, membros, onSave, busy }) {
         <td>{SETOR_ICONES.find(item => item[0] === icone)?.[1]}</td>
         <td>{membros} {membros === 1 ? 'membro ativo' : 'membros ativos'}</td>
         <td><span className={`manager-state ${membros >= 2 ? 'is-active' : ''}`}>{membros >= 2 ? 'Grupo ativo' : 'Grupo inativo'}</span></td>
-        <td><button type="button" className="button button-soft" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button></td>
+        <td><div className="manager-row-actions"><button type="button" className="button button-edit" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button><button type="button" className="button button-danger" disabled={busy || sector.id === 1 || vinculados > 0} title={sector.id === 1 ? 'Vendas é necessário para a distribuição' : vinculados > 0 ? 'Transfira os usuários antes de excluir' : 'Excluir setor sem histórico'} onClick={() => { if (window.confirm(`Excluir o setor ${sector.nome}? Esta ação não pode ser desfeita.`)) onDelete(sector.id) }}>Excluir</button></div></td>
       </tr>
       {aberto && <tr className="manager-detail-row"><td colSpan="5"><form className="manager-edit-grid" onSubmit={async evento => {
         evento.preventDefault()
@@ -1001,10 +1018,68 @@ function InternalSectorEditor({ sector, membros, onSave, busy }) {
       }}>
         <label>Nome<input aria-label={`Nome da equipe ${sector.nome}`} value={nome} onChange={evento => setNome(evento.target.value)} maxLength="80" required /></label>
         <SeletorIcone valor={icone} onChange={setIcone} />
-        <button className="button button-primary" disabled={busy}>Salvar</button>
+        <button className="button button-success" disabled={busy}>Salvar</button>
       </form></td></tr>}
     </Fragment>
   )
+}
+
+const DIAS_SEMANA = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
+
+function ConfiguracaoAutomacao({ agenda, onSave, busy }) {
+  const [rascunho, setRascunho] = useState(agenda)
+  const [editando, setEditando] = useState(false)
+  const [novaData, setNovaData] = useState('')
+  const [mostrarFeriados, setMostrarFeriados] = useState(false)
+  const [anoFeriados, setAnoFeriados] = useState(new Date().getFullYear())
+  const feriados = feriadosNacionais(anoFeriados)
+  useEffect(() => { if (!editando && agenda) setRascunho(agenda) }, [agenda, editando])
+  if (!rascunho) return <p>Carregando configuração...</p>
+  const mudarDia = (indice, campo, valor) => {
+    setEditando(true)
+    setRascunho(atual => ({ ...atual, horarios: { ...atual.horarios, [indice]: { ...atual.horarios[indice], [campo]: valor } } }))
+  }
+  const mudarTexto = (campo, valor) => {
+    setEditando(true)
+    setRascunho(atual => ({ ...atual, [campo]: valor }))
+  }
+  return <section className="surface manager-section bot-settings">
+    <div className="section-heading"><div><h2>Automação do atendimento</h2><p>Horários no fuso de São Paulo. Fora deles, o bot responde uma vez e retoma no próximo expediente.</p></div></div>
+    <form onSubmit={async evento => {
+      evento.preventDefault()
+      if (await onSave({
+        horarios: JSON.stringify(rascunho.horarios),
+        dias_fechados: JSON.stringify(rascunho.dias_fechados),
+        mensagem_fora_expediente: rascunho.mensagem_fora_expediente,
+        mensagem_reabertura: rascunho.mensagem_reabertura,
+        mensagem_standby: rascunho.mensagem_standby,
+      })) setEditando(false)
+    }}>
+      <h3>Horários por dia</h3>
+      <div className="bot-schedule">
+        {DIAS_SEMANA.map((nome, indice) => {
+          const periodo = rascunho.horarios[String(indice)]
+          return <div className="bot-schedule-row" key={nome}>
+            <strong>{nome}</strong>
+            <label><input type="checkbox" checked={periodo.ativo} onChange={evento => mudarDia(indice, 'ativo', evento.target.checked)} /> Aberto</label>
+            <label>Das <input type="time" value={periodo.inicio} onChange={evento => mudarDia(indice, 'inicio', evento.target.value)} disabled={!periodo.ativo} required /></label>
+            <label>Até <input type="time" value={periodo.fim} onChange={evento => mudarDia(indice, 'fim', evento.target.value)} disabled={!periodo.ativo} required /></label>
+          </div>
+        })}
+      </div>
+      <h3>Dias fechados</h3>
+      <p className="muted">Feriados ou pausas específicas. O dia inteiro fica fechado, mesmo que esteja aberto na semana.</p>
+      <div className="bot-date-add"><input type="date" aria-label="Data fechada" value={novaData} onChange={evento => setNovaData(evento.target.value)} /><button type="button" className="button button-soft" disabled={!novaData} onClick={() => { setEditando(true); setRascunho(atual => ({ ...atual, dias_fechados: [...new Set([...atual.dias_fechados, novaData])].sort() })); setNovaData('') }}>Adicionar dia</button></div>
+      <div className="bot-closed-dates">{rascunho.dias_fechados.map(data => <span key={data}>{data.split('-').reverse().join('/')} <button type="button" aria-label={`Remover ${data}`} onClick={() => { setEditando(true); setRascunho(atual => ({ ...atual, dias_fechados: atual.dias_fechados.filter(dia => dia !== data) })) }}>×</button></span>)}</div>
+      <div className="bot-holidays-heading"><button type="button" className="button button-soft" aria-expanded={mostrarFeriados} onClick={() => setMostrarFeriados(!mostrarFeriados)}>{mostrarFeriados ? 'Ocultar calendário' : 'Ver feriados nacionais'}</button>{mostrarFeriados && <label>Ano <input type="number" min="2020" max="2100" value={anoFeriados} onChange={evento => setAnoFeriados(Number(evento.target.value))} /></label>}</div>
+      {mostrarFeriados && <div className="bot-holidays"><p className="muted">Feriados nacionais do Brasil. Clique em uma data para marcar ou desmarcar o fechamento; depois salve a automação. Pontos facultativos e feriados locais não entram automaticamente.</p><div className="bot-holiday-grid">{feriados.map(({ data, nome }) => <button key={data} type="button" className={rascunho.dias_fechados.includes(data) ? 'is-closed' : ''} aria-pressed={rascunho.dias_fechados.includes(data)} onClick={() => { setEditando(true); setRascunho(atual => ({ ...atual, dias_fechados: atual.dias_fechados.includes(data) ? atual.dias_fechados.filter(dia => dia !== data) : [...atual.dias_fechados, data].sort() })) }}><strong>{data.split('-').reverse().slice(0, 2).join('/')}</strong><span>{nome}</span><small>{rascunho.dias_fechados.includes(data) ? 'Fechado' : 'Aberto'}</small></button>)}</div></div>}
+      <h3>Mensagens automáticas</h3>
+      <label>Fora do expediente<textarea value={rascunho.mensagem_fora_expediente} onChange={evento => mudarTexto('mensagem_fora_expediente', evento.target.value)} maxLength="600" required /></label>
+      <label>Retorno ao expediente<textarea value={rascunho.mensagem_reabertura} onChange={evento => mudarTexto('mensagem_reabertura', evento.target.value)} maxLength="600" required /></label>
+      <label>Sem atendente disponível<textarea value={rascunho.mensagem_standby} onChange={evento => mudarTexto('mensagem_standby', evento.target.value)} maxLength="600" required /></label>
+      <button className="button button-primary" disabled={busy || !editando}>Salvar automação</button>
+    </form>
+  </section>
 }
 
 function Manager({
@@ -1017,10 +1092,14 @@ function Manager({
   onTransfer,
   onCreateUser,
   onSaveUser,
+  onDeleteUser,
+  currentUserId,
   onSaveSector,
   onCreateInternalSector,
   onSaveInternalSector,
+  onDeleteInternalSector,
   onToggleSimulator,
+  onSaveBot,
   busy,
 }) {
   const [newUser, setNewUser] = useState({
@@ -1070,18 +1149,24 @@ function Manager({
           <strong>{waiting}</strong>
           <small>Ainda sem responsável</small>
         </div>
-        <div className="stat-card stat-card-gold">
+        <div className="stat-card">
           <span>Equipe de Vendas online</span>
           <strong>{online}</strong>
           <small>Disponíveis para distribuição</small>
         </div>
         <div className="stat-card">
           <span>WhatsApp</span>
-          <strong>{whatsappStatus || 'Verificando'}</strong>
-          <small>Estado da API</small>
+          <strong className={`status-badge ${whatsappStatus?.status === 'conectado' || whatsappStatus?.status === 'simulado' ? 'status-badge-ok' : 'status-badge-error'}`}>{whatsappStatus?.status || 'Verificando'}</strong>
+          <small>{whatsappStatus?.ultimo_evento_em ? `Última mensagem: ${time(whatsappStatus.ultimo_evento_em)}` : 'Nenhuma mensagem registrada'}</small>
         </div>
       </div>
-      <div className="simulator-setting surface">
+      <div className="section-tabs">
+        <button className={tab === 'conversas' ? 'active' : ''} onClick={() => setTab('conversas')}>Conversas</button>
+        <button className={tab === 'equipe' ? 'active' : ''} onClick={() => setTab('equipe')}>Equipe</button>
+        <button className={tab === 'setores' ? 'active' : ''} onClick={() => setTab('setores')}>Setores</button>
+        <button className={tab === 'automacao' ? 'active' : ''} onClick={() => setTab('automacao')}>Automação</button>
+      </div>
+      {tab === 'automacao' && config?.simulador_disponivel && <div className="simulator-setting surface">
         <div>
           <strong>Simulador de WhatsApp</strong>
           <p className="muted">Oculto da navegação e sem envios quando desligado.</p>
@@ -1095,18 +1180,7 @@ function Manager({
           />
           <span>{config?.simulador_ativo ? 'Ativado' : 'Desativado'}</span>
         </label>
-      </div>
-      <div className="section-tabs">
-        <button className={tab === 'conversas' ? 'active' : ''} onClick={() => setTab('conversas')}>
-          Conversas
-        </button>
-        <button className={tab === 'equipe' ? 'active' : ''} onClick={() => setTab('equipe')}>
-          Equipe
-        </button>
-        <button className={tab === 'setores' ? 'active' : ''} onClick={() => setTab('setores')}>
-          Setores
-        </button>
-      </div>
+      </div>}
       {tab === 'conversas' && (
         <section className="surface manager-section">
           <div className="section-heading">
@@ -1161,7 +1235,7 @@ function Manager({
                           <AvatarContato nome={conversa.nome_contato} fotoUrl={conversa.foto_url} />
                           <div>
                             <button className="table-link" onClick={() => onOpen(conversa.id)}>
-                              {conversa.numero}
+                              {formatPhone(conversa.numero)}
                             </button>
                             <small>{conversa.nome_contato || 'Contato sem nome salvo'}</small>
                             <small>{time(conversa.criada_em)}</small>
@@ -1189,7 +1263,7 @@ function Manager({
                             ))}
                           </select>
                           <button
-                            className="button button-soft"
+                            className="button button-warning"
                             disabled={
                               busy || !transfers[conversa.id] || conversa.status !== 'aberta'
                             }
@@ -1283,7 +1357,7 @@ function Manager({
           </form>
           <div className="table-wrap manager-list-table">
             <table><thead><tr><th>Usuário</th><th>Email</th><th>Permissão</th><th>Setor</th><th>Status</th><th>Ações</th></tr></thead><tbody>
-              {users.map(item => <UserEditor key={item.id} user={item} setoresInternos={config?.setores_internos || []} onSave={onSaveUser} busy={busy} />)}
+              {users.map(item => <UserEditor key={item.id} user={item} setoresInternos={config?.setores_internos || []} onSave={onSaveUser} onDelete={onDeleteUser} currentUserId={currentUserId} busy={busy} />)}
             </tbody></table>
           </div>
         </section>
@@ -1311,7 +1385,7 @@ function Manager({
               </div>
             </div>
             <form
-              className="create-user"
+              className="create-internal-sector"
               onSubmit={async (event) => {
                 event.preventDefault()
                 if (await onCreateInternalSector({ nome: newInternalSector, icone: newInternalIcone })) {
@@ -1320,14 +1394,14 @@ function Manager({
                 }
               }}
             >
-              <input
+              <label>Nome do setor<input
                 aria-label="Nova equipe interna"
                 placeholder="Nome do novo setor"
                 value={newInternalSector}
                 onChange={(event) => setNewInternalSector(event.target.value)}
                 maxLength="80"
                 required
-              />
+              /></label>
               <SeletorIcone valor={newInternalIcone} onChange={setNewInternalIcone} />
               <button className="button button-primary" disabled={busy}>
                 Adicionar setor
@@ -1335,11 +1409,12 @@ function Manager({
             </form>
             <div className="table-wrap manager-list-table">
               <table><thead><tr><th>Equipe</th><th>Ícone</th><th>Pessoas</th><th>Grupo</th><th>Ações</th></tr></thead><tbody>
-                {(config?.setores_internos || []).map(item => <InternalSectorEditor key={item.id} sector={item} membros={users.filter(pessoa => pessoa.ativo && pessoa.setor_interno_id === item.id).length} onSave={onSaveInternalSector} busy={busy} />)}
+                {(config?.setores_internos || []).map(item => <InternalSectorEditor key={item.id} sector={item} membros={users.filter(pessoa => pessoa.ativo && pessoa.setor_interno_id === item.id).length} vinculados={users.filter(pessoa => pessoa.setor_interno_id === item.id).length} onSave={onSaveInternalSector} onDelete={onDeleteInternalSector} busy={busy} />)}
               </tbody></table>
             </div>
           </section>
       )}
+      {tab === 'automacao' && <ConfiguracaoAutomacao agenda={config?.configuracao_bot} onSave={onSaveBot} busy={busy} />}
     </div>
   )
 }
@@ -1363,7 +1438,7 @@ function Simulator({ data, client, setClient, onSend, busy }) {
             <div className="sim-avatar">{chosen?.nome?.slice(-1) || '1'}</div>
             <div>
               <h2>{chosen?.nome || 'Cliente'}</h2>
-              <p>{chosen?.numero || ''}</p>
+              <p>{formatPhone(chosen?.numero)}</p>
             </div>
             <Badge status={data?.status || 'novo'}>
               {data?.status === 'encerrada' ? 'Encerrada' : 'Simulação ativa'}
@@ -1407,7 +1482,7 @@ function Simulator({ data, client, setClient, onSend, busy }) {
                   <span className="mini-avatar">{item.nome.slice(-1)}</span>
                   <span>
                     <strong>{item.nome}</strong>
-                    <small>{item.numero}</small>
+                    <small>{formatPhone(item.numero)}</small>
                   </span>
                 </button>
               ))}
@@ -1435,15 +1510,24 @@ function Simulator({ data, client, setClient, onSend, busy }) {
 
 export default function App() {
   const [me, setMe] = useState(undefined)
+  const [modoApresentacao, setModoApresentacao] = useState(() => sessionStorage.getItem('fortgiro-apresentacao') === '1' || new URLSearchParams(location.search).get('apresentacao') === '1')
   const [imagemModal, setImagemModal] = useState(null)
+  const [papelParede, setPapelParede] = useState(lerPapelParede)
+  const [opacidadePapelParede, setOpacidadePapelParede] = useState(() => {
+    const valor = Number(localStorage.getItem(PAPEL_PAREDE_OPACIDADE))
+    return valor >= 0.35 && valor <= 0.8 ? valor : 0.55
+  })
+  const [tomPapelParede, setTomPapelParede] = useState(() => localStorage.getItem(PAPEL_PAREDE_TOM) === 'claro' ? 'claro' : 'escuro')
   const [page, setPage] = useState('inbox')
   const [conversations, setConversations] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [config, setConfig] = useState(null)
   const [whatsappStatus, setWhatsappStatus] = useState(null)
+  const [emExpediente, setEmExpediente] = useState(null)
   const [simData, setSimData] = useState(null)
   const [chamados, setChamados] = useState([])
+  const [chamadosAguardando, setChamadosAguardando] = useState(0)
   const [computadores, setComputadores] = useState([])
   const [client, setClient] = useState('cliente1')
   const [search, setSearch] = useState('')
@@ -1458,6 +1542,16 @@ export default function App() {
   const cursores = useRef({ whatsapp: 0, interno: 0 })
   const eventosProntos = useRef(false)
   const [colegaAlvoId, setColegaAlvoId] = useState(null)
+  const meVisivel = modoApresentacao ? usuarioDemonstracao(me) : me
+  const conversasVisiveis = modoApresentacao ? conversations.map(conversaDemonstracao) : conversations
+  const detalheVisivel = modoApresentacao && detail ? {
+    ...detail,
+    conversa: conversaDemonstracao(detail.conversa),
+    mensagens: detail.mensagens?.map(mensagem => ({ ...mensagem, texto: 'Mensagem de demonstração', imagem_url: null, audio_url: null })),
+  } : detail
+  const configuracaoVisivel = modoApresentacao && config ? { ...config, usuarios: config.usuarios?.map(usuarioDemonstracao) } : config
+  const computadoresVisiveis = modoApresentacao ? computadores.map(pc => ({ ...pc, nome: nomeDemonstracao('Computador', pc.id), dono_nome: nomeDemonstracao('Colaborador', pc.dono_id) })) : computadores
+  const chamadosVisiveis = modoApresentacao ? chamados.map(chamado => ({ ...chamado, computador_nome: nomeDemonstracao('Computador', chamado.computador_id), dono_nome: nomeDemonstracao('Colaborador', chamado.dono_id), descricao: 'O sistema não abre no computador.', solucao: chamado.solucao ? 'Sistema reiniciado e acesso confirmado.' : chamado.solucao, acessos: chamado.acessos?.map(acesso => ({ ...acesso, solicitante: 'Técnico', acesso_url: null })) || [] })) : chamados
   // Controle de respostas fora de ordem no polling: só a consulta mais recente, da conversa e da busca
   // atuais, pode atualizar a tela.
   const selectedIdRef = useRef(null)
@@ -1738,16 +1832,37 @@ export default function App() {
     }
   }, [me?.role, page, config?.simulador_ativo])
   useEffect(() => {
+    if (!me) return
+    const atualizar = () => getJSON('/api/operacao-status').then(dados => setEmExpediente(dados.em_expediente)).catch(() => setEmExpediente(null))
+    atualizar()
+    const intervalo = setInterval(atualizar, 60000)
+    return () => clearInterval(intervalo)
+  }, [me?.id])
+  useEffect(() => {
     if (page !== 'manager') return
     refreshConfig()
     const refreshStatus = () =>
       getJSON('/api/gestor/whatsapp-status')
-        .then((data) => setWhatsappStatus(data.status))
-        .catch(() => setWhatsappStatus('desconectado'))
+        .then(setWhatsappStatus)
+        .catch(() => setWhatsappStatus({ status: 'desconectado' }))
     refreshStatus()
     const interval = setInterval(refreshStatus, 10000)
     return () => clearInterval(interval)
   }, [page, refreshConfig])
+  useEffect(() => {
+    if (!me || me.role === 'colaborador') return
+    let ativo = true
+    const atualizar = async () => {
+      try {
+        const dados = await getJSON('/api/chamados/pendentes')
+        if (ativo) setChamadosAguardando(dados.aguardando_resposta)
+      } catch { /* Mantém a última contagem até a próxima consulta. */ }
+    }
+    atualizar()
+    const intervalo = setInterval(atualizar, 3000)
+    return () => { ativo = false; clearInterval(intervalo) }
+  }, [me?.id, me?.role])
+
   useEffect(() => {
     if (page !== 'tickets') return
     refreshTickets()
@@ -1795,6 +1910,7 @@ export default function App() {
   }
 
   async function action(path, values, success = 'Alterações salvas.', clearSelection = false) {
+    if (modoApresentacao) { setError('Desative o modo apresentação para alterar dados.'); return false }
     setBusy(true)
     setError('')
     setNotice('')
@@ -1823,6 +1939,7 @@ export default function App() {
   }
 
   async function actionRaw(path, options, success = 'Alterações salvas.') {
+    if (modoApresentacao) { setError('Desative o modo apresentação para enviar mensagens.'); return false }
     setBusy(true)
     setError('')
     setNotice('')
@@ -1924,6 +2041,9 @@ export default function App() {
             >
               <Icon name="ticket" />
               Chamados
+              {me.role !== 'colaborador' && chamadosAguardando > 0 && (
+                <span className="nav-count" aria-label={`${chamadosAguardando} chamados aguardando resposta`} title="Chamados aguardando resposta">{chamadosAguardando}</span>
+              )}
             </button>
             <button
               className={page === 'interno' ? 'active' : ''}
@@ -1965,24 +2085,24 @@ export default function App() {
           </nav>
         </div>
         <div className="sidebar-bottom">
-          <div className="sidebar-help">
+          <div className={`sidebar-help ${emExpediente === false ? 'sidebar-help-fechado' : ''}`}>
             <span className="help-dot" />
-            Central FortGiro <small>Atendimento em operação</small>
+            <span><strong>Central FortGiro</strong><small>{emExpediente === null ? 'Verificando expediente' : emExpediente ? 'Dentro do expediente' : 'Fora do expediente'}</small></span>
           </div>
           <div className="sidebar-user">
             <button
               type="button"
               className="user-avatar user-avatar-btn"
-              onClick={() => me.foto_url && setImagemModal({ url: me.foto_url, titulo: me.nome })}
-              disabled={!me.foto_url}
-              title={me.foto_url ? 'Visualizar foto do perfil' : undefined}
-              aria-label={me.foto_url ? 'Visualizar foto do perfil' : 'Foto do perfil'}
+              onClick={() => meVisivel.foto_url && setImagemModal({ url: meVisivel.foto_url, titulo: meVisivel.nome })}
+              disabled={!meVisivel.foto_url}
+              title={meVisivel.foto_url ? 'Visualizar foto do perfil' : undefined}
+              aria-label={meVisivel.foto_url ? 'Visualizar foto do perfil' : 'Foto do perfil'}
             >
-              {me.foto_url ? <img className="int-avatar-photo" src={me.foto_url} alt="" /> : initials(me.nome)}
+              {meVisivel.foto_url ? <img className="int-avatar-photo" src={meVisivel.foto_url} alt="" /> : initials(meVisivel.nome)}
             </button>
             <span>
-              <strong>{me.nome}</strong>
-              <small>{roleName[me.role] || me.role}</small>
+              <strong>{meVisivel.nome}</strong>
+              <small>{roleName[meVisivel.role] || meVisivel.role}</small>
             </span>
             <button onClick={logout} title="Sair" aria-label="Sair">
               <Icon name="logout" />
@@ -1996,18 +2116,23 @@ export default function App() {
             FortGiro <span>/</span> <strong>{headerTitle}</strong>
           </div>
           <div className="topbar-right">
+            <button type="button" className="demo-mode-toggle" onClick={() => { const novo = !modoApresentacao; sessionStorage.setItem('fortgiro-apresentacao', novo ? '1' : '0'); if (location.search) history.replaceState({}, '', location.pathname); setModoApresentacao(novo) }} aria-pressed={modoApresentacao}>Modo apresentação: {modoApresentacao ? 'ligado' : 'desligado'}</button>
             <span className="topbar-date">
-              {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
+              {messageDay(new Date().toISOString())}
             </span>
             <button
               type="button"
               className="topbar-avatar topbar-avatar-btn"
-              onClick={() => me.foto_url && setImagemModal({ url: me.foto_url, titulo: me.nome })}
-              disabled={!me.foto_url}
-              title={me.foto_url ? 'Visualizar foto do perfil' : undefined}
-              aria-label={me.foto_url ? 'Visualizar foto do perfil' : 'Foto do perfil'}
+              onClick={() => meVisivel.foto_url && setImagemModal({ url: meVisivel.foto_url, titulo: meVisivel.nome })}
+              disabled={!meVisivel.foto_url}
+              title={meVisivel.foto_url ? 'Visualizar foto do perfil' : undefined}
+              aria-label={meVisivel.foto_url ? 'Visualizar foto do perfil' : 'Foto do perfil'}
             >
-              {me.foto_url ? <img className="int-avatar-photo" src={me.foto_url} alt="" /> : initials(me.nome)}
+              {meVisivel.foto_url ? <img className="int-avatar-photo" src={meVisivel.foto_url} alt="" /> : initials(meVisivel.nome)}
+            </button>
+            <button type="button" className="topbar-mobile-logout" onClick={logout} title="Sair" aria-label="Sair da conta">
+              <Icon name="logout" />
+              <span>Sair</span>
             </button>
           </div>
         </header>
@@ -2018,8 +2143,8 @@ export default function App() {
               {avisoEvento.quantidade === 1 ? 'nova mensagem' : 'novas mensagens'}
             </strong>
             <span>
-              {avisoEvento.tipo === 'interno' ? avisoEvento.item.nome : avisoEvento.item.numero}:{' '}
-              {avisoEvento.item.texto}
+              {modoApresentacao ? 'Contato fictício' : avisoEvento.tipo === 'interno' ? avisoEvento.item.nome : formatPhone(avisoEvento.item.numero)}:{' '}
+              {modoApresentacao ? 'Mensagem de demonstração' : avisoEvento.item.texto}
             </span>
             <small>Clique para abrir</small>
           </button>
@@ -2039,18 +2164,20 @@ export default function App() {
         )}
         {page === 'inbox' && (
           <Inbox
-            me={me}
-            conversations={conversations}
+            me={meVisivel}
+            papelParede={papelParede}
+            opacidadePapelParede={opacidadePapelParede}
+            conversations={conversasVisiveis}
             selectedId={selectedId}
             onSelect={(id) => {
               setSelectedId(id)
               setDetail(null)
               marcarLidas('whatsapp', id)
             }}
-            detail={detail}
+            detail={detalheVisivel}
             search={search}
             setSearch={setSearch}
-            busy={busy}
+            busy={busy || modoApresentacao}
             onSend={async (id, texto, imagem) => {
               if (imagem) {
                 try {
@@ -2116,6 +2243,7 @@ export default function App() {
               )
             }
             onUploadPhoto={async (id, arquivo) => {
+              if (modoApresentacao) { setError('Desative o modo apresentação para alterar dados.'); return false }
               setBusy(true)
               setError('')
               try {
@@ -2145,12 +2273,12 @@ export default function App() {
         )}
         {page === 'manager' && (
           <Manager
-            conversations={conversations}
-            config={config}
+            conversations={conversasVisiveis}
+            config={configuracaoVisivel}
             whatsappStatus={whatsappStatus}
             vendorFilter={vendorFilter}
             setVendorFilter={setVendorFilter}
-            busy={busy}
+            busy={busy || modoApresentacao}
             onOpen={(id) => {
               setSelectedId(id)
               setDetail(null)
@@ -2180,6 +2308,8 @@ export default function App() {
                 'Usuário atualizado.',
               )
             }
+            onDeleteUser={(id) => actionRaw(`/api/gestor/usuarios/${id}`, { method: 'DELETE' }, 'Usuário excluído.')}
+            currentUserId={me.id}
             onSaveSector={(id, values) =>
               action(`/api/gestor/setores/${id}`, values, 'Setor atualizado.')
             }
@@ -2189,6 +2319,7 @@ export default function App() {
             onSaveInternalSector={(id, values) =>
               action(`/api/gestor/setores-internos/${id}`, values, 'Setor interno atualizado.')
             }
+            onDeleteInternalSector={(id) => actionRaw(`/api/gestor/setores-internos/${id}`, { method: 'DELETE' }, 'Setor interno excluído.')}
             onToggleSimulator={(ativo) =>
               action(
                 '/api/gestor/simulador',
@@ -2196,14 +2327,16 @@ export default function App() {
                 ativo ? 'Simulador ativado.' : 'Simulador desativado.',
               )
             }
+            onSaveBot={(values) => action('/api/gestor/configuracao-bot', values, 'Automação atualizada.')}
           />
         )}
         {page === 'tickets' &&
           (me.role === 'colaborador' ? (
             <ChamadosVendedor
-              chamados={chamados}
-              computadores={computadores}
-              busy={busy}
+              modoApresentacao={modoApresentacao}
+              chamados={chamadosVisiveis}
+              computadores={computadoresVisiveis}
+              busy={busy || modoApresentacao}
               onCreate={(values) =>
                 action(
                   '/api/meus-chamados',
@@ -2214,11 +2347,12 @@ export default function App() {
             />
           ) : (
             <Chamados
-              me={me}
-              chamados={chamados}
-              computadores={computadores}
-              usuarios={config?.usuarios || []}
-              busy={busy}
+              modoApresentacao={modoApresentacao}
+              me={meVisivel}
+              chamados={chamadosVisiveis}
+              computadores={computadoresVisiveis}
+              usuarios={configuracaoVisivel?.usuarios || []}
+              busy={busy || modoApresentacao}
               onRequest={(id) =>
                 action(`/api/chamados/${id}/acessos`, {}, 'Solicitação de acesso registrada.')
               }
@@ -2236,7 +2370,11 @@ export default function App() {
           ))}
         {page === 'interno' && (
           <Interno
-            me={me}
+            me={meVisivel}
+            modoApresentacao={modoApresentacao}
+            papelParede={papelParede}
+            opacidadePapelParede={opacidadePapelParede}
+            tomPapelParede={tomPapelParede}
             abrirColegaId={colegaAlvoId}
             onOpen={(id) => marcarLidas('interno', id)}
             onUnreadChange={setInternoNaoLidasTotal}
@@ -2245,7 +2383,14 @@ export default function App() {
         )}
         {page === 'perfil' && (
           <Perfil
-            me={me}
+            me={meVisivel}
+            somenteLeitura={modoApresentacao}
+            papelParede={papelParede}
+            opacidadePapelParede={opacidadePapelParede}
+            tomPapelParede={tomPapelParede}
+            onPapelParede={(valor) => { if (!salvarPapelParede(valor)) return false; setPapelParede(valor); return true }}
+            onOpacidadePapelParede={(valor) => { localStorage.setItem(PAPEL_PAREDE_OPACIDADE, String(valor)); setOpacidadePapelParede(valor) }}
+            onTomPapelParede={(valor) => { localStorage.setItem(PAPEL_PAREDE_TOM, valor); setTomPapelParede(valor) }}
             onVisualizarFoto={(url, titulo) => setImagemModal({ url, titulo })}
             onEnviarFoto={async (arquivo) => {
               const corpo = await converterWebp(arquivo, 512)

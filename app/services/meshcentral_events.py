@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from websockets.asyncio.client import connect
 
@@ -139,22 +139,39 @@ async def registrar_evento(db: AsyncSession, evento: dict) -> bool:
                     .where(
                         AcessoRemoto.computador_id == computador.id,
                         AcessoRemoto.solicitante_id == operador.id,
-                        AcessoRemoto.resultado == "autorizado",
-                        AcessoRemoto.autorizado_em.is_not(None),
                         AcessoRemoto.fim_em.is_(None),
+                        AcessoRemoto.inicio_em <= momento,
+                        or_(
+                            and_(AcessoRemoto.resultado == "autorizado", AcessoRemoto.autorizado_em <= momento, AcessoRemoto.autorizado_em >= momento - timedelta(minutes=30)),
+                            and_(AcessoRemoto.resultado == "pendente", AcessoRemoto.expira_em >= momento),
+                        ),
                     )
-                    .order_by(AcessoRemoto.autorizado_em.desc())
+                    .order_by(AcessoRemoto.inicio_em.desc())
                 )).scalars().first()
                 if acesso is not None:
-                    autorizado = acesso.autorizado_em
-                    if autorizado.tzinfo is not None:
-                        autorizado = autorizado.astimezone(timezone.utc).replace(tzinfo=None)
-                    if autorizado <= momento <= autorizado + timedelta(minutes=30):
+                    inicio_pedido = acesso.inicio_em
+                    if inicio_pedido.tzinfo is not None:
+                        inicio_pedido = inicio_pedido.astimezone(timezone.utc).replace(tzinfo=None)
+                    limite = acesso.expira_em if acesso.resultado == "pendente" else acesso.autorizado_em + timedelta(minutes=30)
+                    if limite.tzinfo is not None:
+                        limite = limite.astimezone(timezone.utc).replace(tzinfo=None)
+                    if inicio_pedido <= momento <= limite:
                         registro.acesso_id = acesso.id
+                        if acesso.resultado == "pendente":
+                            # O relay conectado comprova o aceite nativo do agente.
+                            acesso.resultado = "aceito" if registro.fim_em is None else "encerrado"
+                            acesso.autorizado_em = momento
+                            if registro.fim_em is not None:
+                                acesso.fim_em = registro.fim_em
     else:
         if registro.fim_em is None or momento > registro.fim_em:
             registro.fim_em = momento
         registro.estado = "encerrada"
+        if registro.acesso_id is not None:
+            acesso = await db.get(AcessoRemoto, registro.acesso_id)
+            if acesso is not None and acesso.resultado == "aceito" and acesso.fim_em is None:
+                acesso.resultado = "encerrado"
+                acesso.fim_em = registro.fim_em
     # Handle both an out-of-order end and duplicate events without reopening.
     registro.observado_em = now()
     await db.flush()

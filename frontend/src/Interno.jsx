@@ -3,14 +3,17 @@ import { messageDay, messageHour } from './dates.js'
 import { converterWebp } from './images.js'
 import ModalImagem from './ModalImagem.jsx'
 import { requisitar as fetchApi } from './api.js'
+import { copiarTexto } from './clipboard.js'
 
 const BASE = '/api/interno'
 const PAGINA = 50
 const INTERVALO_MS = 3000
 const JANELA_AGRUPAR_MS = 5 * 60 * 1000
 const LIMITE_ORIGEM = 12 * 1024 * 1024
-const PAPEL_PAREDE_STORAGE = 'fortgiro.chat-interno.papel-parede'
-const PAPEL_PAREDE_TAMANHO_MAX_MB = 2
+export const PAPEL_PAREDE_STORAGE = 'fortgiro.papel-parede'
+export const PAPEL_PAREDE_OPACIDADE = 'fortgiro.papel-parede.opacidade'
+export const PAPEL_PAREDE_TOM = 'fortgiro.papel-parede.tom'
+const PAPEL_PAREDE_TAMANHO_MAX_MB = 12
 
 /* ───────────── API ───────────── */
 
@@ -53,7 +56,11 @@ function rotasDe(grupo, colega) {
 
 /* ───────────── utilidades ───────────── */
 
-const iniciais = nome => (nome || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(parte => parte[0].toUpperCase()).join('')
+const iniciais = nome => {
+  const partes = (nome || '?').split(/\s+/).filter(Boolean)
+  const numero = partes.at(-1)?.match(/^0*(\d+)$/)
+  return numero ? `${partes[0]?.[0]?.toUpperCase() || 'C'}${numero[1]}` : partes.slice(0, 2).map(parte => parte[0].toUpperCase()).join('')
+}
 const plural = (n, singular, pluralForma) => `${n} ${n === 1 ? singular : pluralForma}`
 const proximos = (a, b) => { const dif = new Date(b) - new Date(a); return dif >= 0 && dif < JANELA_AGRUPAR_MS }
 
@@ -65,13 +72,14 @@ function mesclar(atuais, novas) {
 
 export function lerPapelParede(chave = PAPEL_PAREDE_STORAGE) {
   try {
-    return window.localStorage.getItem(chave) || ''
+    const valor = window.localStorage.getItem(chave) || ''
+    return /^data:image\/(png|jpeg|webp);base64,/i.test(valor) ? valor : ''
   } catch {
     return ''
   }
 }
 
-function salvarPapelParede(valor, chave) {
+export function salvarPapelParede(valor, chave = PAPEL_PAREDE_STORAGE) {
   try {
     if (valor) window.localStorage.setItem(chave, valor)
     else window.localStorage.removeItem(chave)
@@ -81,92 +89,99 @@ function salvarPapelParede(valor, chave) {
   }
 }
 
-export function PapelParede({ valor, onChange, onErro, chave = PAPEL_PAREDE_STORAGE }) {
-  const arquivo = useRef(null)
-  const [aberto, setAberto] = useState(false)
-  const [link, setLink] = useState(() => (valor.startsWith('http') ? valor : ''))
+function desenharRecorte(canvas, imagem, zoom, horizontal, vertical) {
+  const proporcao = canvas.width / canvas.height
+  const larguraBase = Math.min(imagem.naturalWidth, imagem.naturalHeight * proporcao)
+  const largura = larguraBase / zoom
+  const altura = largura / proporcao
+  const esquerda = (imagem.naturalWidth - largura) * (horizontal + 1) / 2
+  const topo = (imagem.naturalHeight - altura) * (vertical + 1) / 2
+  const contexto = canvas.getContext('2d')
+  contexto.clearRect(0, 0, canvas.width, canvas.height)
+  contexto.drawImage(imagem, esquerda, topo, largura, altura, 0, 0, canvas.width, canvas.height)
+}
 
-  function aplicar(novoValor) {
-    if (!salvarPapelParede(novoValor, chave)) {
-      onErro('Não foi possível salvar o papel de parede neste navegador.')
-      return
-    }
-    onChange(novoValor)
-    onErro('')
-    setAberto(false)
+export function PapelParede({ valor, opacidade, tom, onChange, onOpacidade, onTom }) {
+  const arquivo = useRef(null)
+  const previa = useRef(null)
+  const imagemRef = useRef(null)
+  const [fonte, setFonte] = useState('')
+  const [versaoImagem, setVersaoImagem] = useState(0)
+  const [zoom, setZoom] = useState(1)
+  const [horizontal, setHorizontal] = useState(0)
+  const [vertical, setVertical] = useState(0)
+  const [erro, setErro] = useState('')
+
+  useEffect(() => {
+    imagemRef.current = null
+    if (!fonte) return undefined
+    const imagem = new Image()
+    imagem.onload = () => { imagemRef.current = imagem; setVersaoImagem(atual => atual + 1) }
+    imagem.onerror = () => setErro('Não foi possível abrir a imagem.')
+    imagem.src = fonte
+    return () => { imagem.onload = null; imagem.onerror = null }
+  }, [fonte])
+
+  useEffect(() => {
+    if (previa.current && imagemRef.current) desenharRecorte(previa.current, imagemRef.current, zoom, horizontal, vertical)
+  }, [fonte, versaoImagem, zoom, horizontal, vertical])
+
+  function iniciarRecorte(origem) {
+    setZoom(1); setHorizontal(0); setVertical(0); setErro(''); setFonte(origem)
   }
 
   function escolherArquivo(evento) {
     const imagem = evento.target.files?.[0]
     evento.target.value = ''
     if (!imagem) return
-    if (!imagem.type.startsWith('image/')) {
-      onErro('Escolha um arquivo de imagem.')
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(imagem.type)) {
+      setErro('Escolha uma imagem PNG, JPG ou WebP.')
       return
     }
     if (imagem.size > PAPEL_PAREDE_TAMANHO_MAX_MB * 1024 * 1024) {
-      onErro(`A imagem deve ter até ${PAPEL_PAREDE_TAMANHO_MAX_MB} MB.`)
+      setErro(`A imagem original deve ter até ${PAPEL_PAREDE_TAMANHO_MAX_MB} MB.`)
       return
     }
     const leitor = new FileReader()
-    leitor.onload = () => aplicar(typeof leitor.result === 'string' ? leitor.result : '')
-    leitor.onerror = () => onErro('Não foi possível ler a imagem escolhida.')
+    leitor.onload = () => iniciarRecorte(typeof leitor.result === 'string' ? leitor.result : '')
+    leitor.onerror = () => setErro('Não foi possível ler a imagem escolhida.')
     leitor.readAsDataURL(imagem)
   }
 
-  function aplicarLink(evento) {
-    evento.preventDefault()
-    const endereco = link.trim()
-    try {
-      const url = new URL(endereco)
-      if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
-      aplicar(endereco)
-    } catch {
-      onErro('Informe um link válido começando com http:// ou https://.')
-    }
+  function aplicarRecorte() {
+    if (!imagemRef.current) return
+    const canvas = document.createElement('canvas')
+    canvas.width = 1200; canvas.height = 675
+    desenharRecorte(canvas, imagemRef.current, zoom, horizontal, vertical)
+    if (onChange(canvas.toDataURL('image/webp', 0.82))) { setFonte(''); setErro('') }
+    else setErro('Não foi possível salvar a imagem neste navegador.')
   }
 
   return (
-    <div className="int-wallpaper">
-      <button
-        type="button"
-        className="button button-soft int-wallpaper-toggle"
-        aria-expanded={aberto}
-        onClick={() => setAberto(atual => !atual)}
-      >
-        Papel de parede
-      </button>
-      {aberto && (
-        <div className="int-wallpaper-panel">
-          <div className="int-wallpaper-panel-head">
-            <strong>Personalizar chat</strong>
-            <button type="button" className="int-wallpaper-close" onClick={() => setAberto(false)} aria-label="Fechar papel de parede" title="Fechar">×</button>
-          </div>
-          <small>A imagem fica somente neste navegador e não é enviada ao servidor.</small>
-          <input ref={arquivo} type="file" accept="image/*" hidden onChange={escolherArquivo} />
-          <button type="button" className="button button-soft" onClick={() => arquivo.current?.click()}>
-            Escolher imagem
-          </button>
-          <form onSubmit={aplicarLink}>
-            <label>
-              Ou use um link de imagem
-              <input
-                type="url"
-                value={link}
-                placeholder="https://exemplo.com/fundo.jpg"
-                onChange={evento => setLink(evento.target.value)}
-              />
-            </label>
-            <button type="submit" className="button button-primary">Usar link</button>
-          </form>
-          {valor && (
-            <button type="button" className="text-button" onClick={() => { aplicar(''); setLink('') }}>
-              Usar fundo branco
-            </button>
-          )}
-        </div>
-      )}
-    </div>
+    <section className="surface perfil-card perfil-papel-parede">
+      <h2>Papel de parede dos chats</h2>
+      <p className="muted">Escolha e recorte uma imagem para Atendimentos e Chat interno. Ela fica somente neste navegador.</p>
+      <input ref={arquivo} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={escolherArquivo} />
+      <div className="perfil-wallpaper-actions">
+        <button type="button" className="button button-soft" onClick={() => arquivo.current?.click()}>Escolher imagem</button>
+        {valor && !fonte && <button type="button" className="button button-soft" onClick={() => iniciarRecorte(valor)}>Recortar imagem atual</button>}
+        {valor && <button type="button" className="button button-soft" onClick={() => { onChange(''); setFonte('') }}>Remover imagem</button>}
+      </div>
+      <div className="wallpaper-preview" aria-label="Prévia do papel de parede" style={!fonte && valor ? { backgroundImage: `url("${valor}")` } : undefined}>
+        {fonte && <canvas ref={previa} width="480" height="270" aria-label="Área de recorte" />}
+        <div className="wallpaper-preview-shade" style={{ backgroundColor: tom === 'claro' ? `rgba(255,255,255,${opacidade})` : `rgba(0,0,0,${opacidade})` }} />
+        <div className="wallpaper-preview-bubbles"><span>Mensagem recebida <small>10:30</small></span><span>Resposta enviada <small>10:31</small></span></div>
+      </div>
+      {fonte && <div className="wallpaper-crop-controls">
+        <label>Zoom: {Math.round(zoom * 100)}%<input type="range" min="1" max="3" step="0.05" value={zoom} onChange={evento => setZoom(Number(evento.target.value))} /></label>
+        <label>Posição horizontal<input type="range" min="-1" max="1" step="0.01" value={horizontal} onChange={evento => setHorizontal(Number(evento.target.value))} /></label>
+        <label>Posição vertical<input type="range" min="-1" max="1" step="0.01" value={vertical} onChange={evento => setVertical(Number(evento.target.value))} /></label>
+        <div className="perfil-wallpaper-actions"><button type="button" className="button button-primary" disabled={!imagemRef.current} onClick={aplicarRecorte}>Aplicar recorte</button><button type="button" className="button button-soft" onClick={() => setFonte('')}>Cancelar</button></div>
+      </div>}
+      <fieldset className="wallpaper-tone"><legend>Camada de contraste</legend><label><input type="radio" name="wallpaper-tone" checked={tom !== 'claro'} onChange={() => onTom('escuro')} /> Escura</label><label><input type="radio" name="wallpaper-tone" checked={tom === 'claro'} onChange={() => onTom('claro')} /> Clara</label></fieldset>
+      <label className="wallpaper-opacity-control">Intensidade da camada: {Math.round(opacidade * 100)}% <input type="range" min="0.35" max="0.8" step="0.05" value={opacidade} onChange={evento => onOpacidade(Number(evento.target.value))} /></label>
+      {erro && <p role="alert" className="form-error">{erro}</p>}
+    </section>
   )
 }
 
@@ -191,6 +206,7 @@ const ICONES = {
   opcoes: <path d="m7 10 5 5 5-5" />,
   editar: <><path d="M4 20h4l11-11a2 2 0 0 0-4-4L4 16v4zM13 7l4 4" /></>,
   apagar: <><path d="M4 7h16M10 4h4M6 7l1 13h10l1-13M10 11v6m4-6v6" /></>,
+  copiar: <><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h2" /></>,
 }
 
 export function Icone({ nome, tamanho = 20, className }) {
@@ -327,6 +343,7 @@ function useMensagens(caminho, onErro) {
 
 function Diretorio({ setores, conversas, aberto, onAlternar, colegaId, grupoId, onPessoa, onGrupo }) {
   const [busca, setBusca] = useState('')
+  const [aba, setAba] = useState('recentes')
   const termo = busca.trim().toLowerCase()
   const totalOnline = setores.reduce((soma, setor) => soma + setor.pessoas.filter(p => p.ativo && p.online).length, 0)
 
@@ -348,9 +365,13 @@ function Diretorio({ setores, conversas, aberto, onAlternar, colegaId, grupoId, 
         <Icone nome="buscar" tamanho={16} />
         <input type="search" value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar pessoa ou setor" aria-label="Buscar pessoa ou setor" />
       </label>
+      <div className="int-directory-tabs" role="tablist" aria-label="Listas do chat interno">
+        <button type="button" role="tab" aria-selected={aba === 'recentes'} className={aba === 'recentes' ? 'active' : ''} onClick={() => setAba('recentes')}>Recentes</button>
+        <button type="button" role="tab" aria-selected={aba === 'equipe'} className={aba === 'equipe' ? 'active' : ''} onClick={() => setAba('equipe')}>Equipe</button>
+      </div>
 
       <div className="conversation-items">
-        {conversas.length > 0 && <section className="int-recents"><h3>Conversas recentes</h3>
+        {aba === 'recentes' && (conversas.length > 0 ? <section className="int-recents"><h3>Conversas recentes</h3>
           {conversas.map(item => <button type="button" key={`${item.tipo}-${item.alvo_id}`}
             className={`conversation-item int-person${(item.tipo === 'grupo' ? grupoId === item.alvo_id : colegaId === item.alvo_id) ? ' selected' : ''}`}
             onClick={() => (item.tipo === 'grupo'
@@ -364,8 +385,8 @@ function Diretorio({ setores, conversas, aberto, onAlternar, colegaId, grupoId, 
             <span className="conversation-item-meta">{item.ultima_em && <time>{messageHour(item.ultima_em)}</time>}
               {item.nao_lidas > 0 && <b className="nav-count">{item.nao_lidas > 99 ? '99+' : item.nao_lidas}</b>}</span>
           </button>)}
-        </section>}
-        {visiveis.map(({ setor, pessoas }) => {
+        </section> : <p className="empty-list">Nenhuma conversa recente.</p>)}
+        {aba === 'equipe' && visiveis.map(({ setor, pessoas }) => {
           const expandido = Boolean(termo) || aberto === setor.id
           const online = setor.pessoas.filter(p => p.ativo && p.online).length
           return (
@@ -410,7 +431,7 @@ function Diretorio({ setores, conversas, aberto, onAlternar, colegaId, grupoId, 
             </section>
           )
         })}
-        {termo && !visiveis.length && <p className="empty-list">Ninguém encontrado para “{busca.trim()}”.</p>}
+        {aba === 'equipe' && termo && !visiveis.length && <p className="empty-list">Ninguém encontrado para “{busca.trim()}”.</p>}
       </div>
     </aside>
   )
@@ -451,9 +472,11 @@ function CabecalhoChat({ grupo, colega, onVoltar, onImagem }) {
   )
 }
 
-function ListaMensagens({ mensagens, meId, nomeRemetente, fotoRemetente, ehGrupo, temAnteriores, onAnteriores, onImagem, onApagar, onEditar }) {
+function ListaMensagens({ mensagens, meId, nomeRemetente, fotoRemetente, ehGrupo, temAnteriores, onAnteriores, onImagem, onApagar, onEditar, somenteLeitura }) {
   const area = useRef(null)
   const [menuId, setMenuId] = useState(null)
+  const [copiaStatus, setCopiaStatus] = useState('')
+  useEffect(() => { if (!copiaStatus) return undefined; const id = setTimeout(() => setCopiaStatus(''), 2400); return () => clearTimeout(id) }, [copiaStatus])
   const [editandoId, setEditandoId] = useState(null)
   const [textoEditado, setTextoEditado] = useState('')
   const [salvando, setSalvando] = useState(false)
@@ -509,8 +532,8 @@ function ListaMensagens({ mensagens, meId, nomeRemetente, fotoRemetente, ehGrupo
           <Fragment key={mensagem.id}>
             {novoDia && <div className="day-divider"><span>{messageDay(mensagem.criada_em)}</span></div>}
             <div className={`message-row${minha ? ' message-outgoing' : ''}${continua ? ' int-cont' : ''}`}>
-              <div className={`${minha ? 'message-bubble message-bubble-outgoing' : 'message-bubble'}${!minha && !continua ? ' int-bubble-with-author' : ''}`}>
-                {!minha && !continua && <div className="int-message-author"><Avatar
+              <div className={`${minha ? 'message-bubble message-bubble-outgoing' : 'message-bubble'}${!minha && !continua && ehGrupo ? ' int-bubble-with-author' : ''}`}>
+                {!minha && !continua && ehGrupo && <div className="int-message-author"><Avatar
                   nome={ehGrupo ? mensagem.remetente_nome : nomeRemetente}
                   fotoUrl={ehGrupo ? mensagem.remetente_foto_url : fotoRemetente}
                 /></div>}
@@ -543,11 +566,12 @@ function ListaMensagens({ mensagens, meId, nomeRemetente, fotoRemetente, ehGrupo
                   </button>
                 )}
                 <time>{messageHour(mensagem.criada_em)}{mensagem.editada_em && ' · editada'}</time>
-                {minha && !mensagem.apagada && editandoId !== mensagem.id && <div className="int-message-options">
+                {!mensagem.apagada && editandoId !== mensagem.id && (mensagem.texto || (minha && !somenteLeitura)) && <div className="int-message-options">
                   <button type="button" className="int-message-menu-trigger" aria-label="Opções da mensagem" aria-expanded={menuId === mensagem.id} onClick={() => setMenuId(menuId === mensagem.id ? null : mensagem.id)}><Icone nome="opcoes" tamanho={16} /></button>
                   {menuId === mensagem.id && <div className="int-message-menu">
-                    {!mensagem.imagem_url && !mensagem.audio_url && <button type="button" title="Editar mensagem" aria-label="Editar mensagem" onClick={() => { setEditandoId(mensagem.id); setTextoEditado(mensagem.texto); setMenuId(null) }}><Icone nome="editar" tamanho={16} /></button>}
-                    <button type="button" title="Apagar mensagem" aria-label="Apagar mensagem" onClick={() => { setMenuId(null); if (window.confirm('Apagar esta mensagem para todos no chat interno?')) onApagar(mensagem.id) }}><Icone nome="apagar" tamanho={16} /></button>
+                    {mensagem.texto && <button type="button" title="Copiar mensagem" aria-label="Copiar mensagem" onClick={async () => { const ok = await copiarTexto(mensagem.texto); setCopiaStatus(ok ? 'Mensagem copiada.' : 'Não foi possível copiar.'); setMenuId(null) }}><Icone nome="copiar" tamanho={16} /></button>}
+                    {minha && !somenteLeitura && !mensagem.imagem_url && !mensagem.audio_url && <button type="button" title="Editar mensagem" aria-label="Editar mensagem" onClick={() => { setEditandoId(mensagem.id); setTextoEditado(mensagem.texto); setMenuId(null) }}><Icone nome="editar" tamanho={16} /></button>}
+                    {minha && !somenteLeitura && <button type="button" title="Apagar mensagem" aria-label="Apagar mensagem" onClick={() => { setMenuId(null); if (window.confirm('Apagar esta mensagem para todos no chat interno?')) onApagar(mensagem.id) }}><Icone nome="apagar" tamanho={16} /></button>}
                   </div>}
                 </div>}
               </div>
@@ -555,6 +579,7 @@ function ListaMensagens({ mensagens, meId, nomeRemetente, fotoRemetente, ehGrupo
           </Fragment>
         )
       })}
+      {copiaStatus && <div className="copy-feedback" role="status" onClick={() => setCopiaStatus('')}>{copiaStatus}</div>}
     </div>
   )
 }
@@ -645,7 +670,7 @@ function Composer({ rotas, destino, onEnviado, onErro }) {
   }
 
   function aoTeclar(evento) {
-    if (evento.key === 'Enter' && !evento.shiftKey && !evento.nativeEvent.isComposing) enviar(evento)
+    if (evento.key === 'Enter' && !evento.shiftKey && !evento.ctrlKey && !evento.metaKey && !evento.nativeEvent.isComposing) enviar(evento)
   }
 
   async function enviarAudio(blob) {
@@ -670,12 +695,12 @@ function Composer({ rotas, destino, onEnviado, onErro }) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const tipo = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'].find(item => MediaRecorder.isTypeSupported(item))
-      if (!tipo) { stream.getTracks().forEach(track => track.stop()); onErro('Formato de gravação não suportado.'); return }
+      if (!tipo) { stream.getTracks().forEach(track => { track.stop() }); onErro('Formato de gravação não suportado.'); return }
       const recorder = new MediaRecorder(stream, { mimeType: tipo })
       const partes = []
       recorder.ondataavailable = evento => { if (evento.data.size) partes.push(evento.data) }
       recorder.onstop = async () => {
-        stream.getTracks().forEach(track => track.stop())
+        stream.getTracks().forEach(track => { track.stop() })
         gravador.current = null
         setGravando(false)
         if (cancelarAudio.current) { cancelarAudio.current = false; return }
@@ -703,7 +728,7 @@ function Composer({ rotas, destino, onEnviado, onErro }) {
         <input ref={arquivo} type="file" accept="image/*" hidden onChange={e => escolherImagem(e.target.files?.[0])} />
         <input ref={audioArquivo} type="file" accept=".mp3,.ogg,audio/mpeg,audio/ogg" hidden onChange={e => { const escolhido = e.target.files?.[0]; e.target.value = ''; if (escolhido) enviarAudio(escolhido) }} />
         <button type="button" className="int-icon-btn" onClick={() => arquivo.current?.click()} disabled={enviando} aria-label="Anexar imagem" title="Anexar imagem"><Icone nome="clipe" /></button>
-        <button type="button" className="int-icon-btn" onClick={() => audioArquivo.current?.click()} disabled={enviando || gravando} aria-label="Anexar áudio" title="Anexar áudio">♪</button>
+        <button type="button" className="int-icon-btn int-audio-attach" onClick={() => audioArquivo.current?.click()} disabled={enviando || gravando} aria-label="Anexar áudio" title="Anexar áudio"><Icone nome="mic" tamanho={20} /><span>Áudio</span></button>
         <textarea ref={campo} rows="1" value={texto} maxLength="4000" placeholder={`Mensagem para ${destino}`} aria-label="Mensagem"
           onChange={e => setTexto(e.target.value)} onKeyDown={aoTeclar} onPaste={aoColar} disabled={gravando} />
         {texto.trim() || imagem ? <button type="submit" className="button button-primary" disabled={enviando || gravando}>
@@ -717,7 +742,7 @@ function Composer({ rotas, destino, onEnviado, onErro }) {
 
 /* ───────────── conversa ativa ───────────── */
 
-function Conversa({ rotas, grupo, colega, me, onVoltar, onImagem, onErro, atualizarConversas, onOpen }) {
+function Conversa({ rotas, grupo, colega, me, onVoltar, onImagem, onErro, atualizarConversas, onOpen, modoApresentacao }) {
   const { mensagens, temAnteriores, atualizar, carregarAnteriores, marcarApagada } = useMensagens(rotas.mensagens, onErro)
   const ultimaMensagemId = mensagens.at(-1)?.id
 
@@ -739,11 +764,12 @@ function Conversa({ rotas, grupo, colega, me, onVoltar, onImagem, onErro, atuali
     <>
       <CabecalhoChat grupo={grupo} colega={colega} onVoltar={onVoltar} onImagem={onImagem} />
       <ListaMensagens
-        mensagens={mensagens}
+        mensagens={modoApresentacao ? mensagens.map(mensagem => ({ ...mensagem, texto: 'Mensagem de demonstração', imagem_url: null, audio_url: null, remetente_nome: `Colaborador ${mensagem.remetente_id}`, remetente_foto_url: null })) : mensagens}
         meId={me.id}
         nomeRemetente={grupo ? null : colega.nome}
         fotoRemetente={grupo ? null : colega.foto_url}
         ehGrupo={Boolean(grupo)}
+        somenteLeitura={modoApresentacao}
         temAnteriores={temAnteriores}
         onAnteriores={carregarAnteriores}
         onImagem={onImagem}
@@ -764,42 +790,25 @@ function Conversa({ rotas, grupo, colega, me, onVoltar, onImagem, onErro, atuali
           } catch (falha) { onErro(falha.message); return false }
         }}
       />
-      <Composer
+      {modoApresentacao ? <div className="chat-composer int-read-only" role="status">Modo apresentação · conversa somente para leitura</div> : <Composer
         rotas={rotas}
         destino={grupo ? `Grupo · ${grupo.nome}` : colega.nome}
         onEnviado={() => atualizar(true)}
         onErro={onErro}
-      />
+      />}
     </>
   )
 }
 
 /* ───────────── página ───────────── */
 
-export default function Interno({ me, abrirColegaId, onOpen, onUnreadChange, onVisualizarImagem }) {
+export default function Interno({ me, abrirColegaId, onOpen, onUnreadChange, onVisualizarImagem, papelParede, opacidadePapelParede, tomPapelParede, modoApresentacao }) {
   const [erro, setErro] = useState('')
   const [aberto, setAberto] = useState(null)
   const [colegaSel, setColegaSel] = useState(null)
   const [grupoSel, setGrupoSel] = useState(null)
   const [imagemAberta, setImagemAberta] = useState(null)
   const [conversas, setConversas] = useState([])
-  const [papelParede, setPapelParede] = useState(lerPapelParede)
-  const [papelParedeValido, setPapelParedeValido] = useState('')
-
-  useEffect(() => {
-    if (!papelParede) {
-      setPapelParedeValido('')
-      return undefined
-    }
-    const imagem = new Image()
-    imagem.onload = () => setPapelParedeValido(papelParede)
-    imagem.onerror = () => setPapelParedeValido('')
-    imagem.src = papelParede
-    return () => {
-      imagem.onload = null
-      imagem.onerror = null
-    }
-  }, [papelParede])
 
   const abrirImagem = useCallback((url, titulo) => {
     if (!url) return
@@ -820,6 +829,8 @@ export default function Interno({ me, abrirColegaId, onOpen, onUnreadChange, onV
   }, [atualizarConversas])
 
   const setores = useSetores(setErro)
+  const setoresVisiveis = modoApresentacao ? setores.map(setor => ({ ...setor, pessoas: setor.pessoas.map(pessoa => ({ ...pessoa, nome: `Colaborador ${pessoa.id}`, foto_url: null })) })) : setores
+  const conversasVisiveis = modoApresentacao ? conversas.map(item => ({ ...item, nome: item.tipo === 'grupo' ? item.nome : `Colaborador ${item.alvo_id}`, foto_url: null, ultimo_remetente: item.ultimo_remetente ? 'Colaborador' : null, ultima_previa: item.ultima_previa ? 'Mensagem de demonstração' : null })) : conversas
   const pessoas = useMemo(() => setores.flatMap(setor => setor.pessoas), [setores])
   // versão atualizada (online/offline) do item selecionado
   const colega = colegaSel && (pessoas.find(p => p.id === colegaSel.id) || colegaSel)
@@ -854,19 +865,18 @@ export default function Interno({ me, abrirColegaId, onOpen, onUnreadChange, onV
 
       <div className={rotas ? 'inbox-layout int-layout has-chat' : 'inbox-layout int-layout'}>
         <Diretorio
-          setores={setores} conversas={conversas} aberto={aberto} colegaId={colegaSel?.id} grupoId={grupoSel?.id}
+          setores={setoresVisiveis} conversas={conversasVisiveis} aberto={aberto} colegaId={colegaSel?.id} grupoId={grupoSel?.id}
           onAlternar={id => setAberto(atual => (atual === id ? null : id))}
           onPessoa={selecionarPessoa} onGrupo={selecionarGrupo}
         />
         <section
           className="chat-pane"
           aria-label="Conversa"
-          style={papelParedeValido ? {
-            '--int-wallpaper': `url("${papelParedeValido}")`,
+          style={papelParede ? {
+            '--int-wallpaper': `linear-gradient(${tomPapelParede === 'claro' ? `rgba(255,255,255,${opacidadePapelParede})` : `rgba(0,0,0,${opacidadePapelParede})`},${tomPapelParede === 'claro' ? `rgba(255,255,255,${opacidadePapelParede})` : `rgba(0,0,0,${opacidadePapelParede})`}),url("${papelParede}")`,
             '--int-wallpaper-size': 'cover',
           } : undefined}
         >
-          <PapelParede valor={papelParede} onChange={setPapelParede} onErro={setErro} />
           {!rotas ? (
             <div className="chat-placeholder">
               <span className="placeholder-mark"><Icone nome="conversa" tamanho={34} /></span>
@@ -878,8 +888,9 @@ export default function Interno({ me, abrirColegaId, onOpen, onUnreadChange, onV
               key={rotas.mensagens}
               rotas={rotas}
               grupo={grupo}
-              colega={colega}
+              colega={modoApresentacao && colega ? { ...colega, nome: `Colaborador ${colega.id}`, foto_url: null } : colega}
               me={me}
+              modoApresentacao={modoApresentacao}
               onVoltar={voltar}
               onImagem={abrirImagem}
               onErro={setErro}

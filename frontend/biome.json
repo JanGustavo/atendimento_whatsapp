@@ -24,7 +24,9 @@
         "noArrayIndexKey": "off"
       },
       "a11y": {
-        "recommended": false
+        "recommended": false,
+        "useAltText": "error",
+        "useValidAnchor": "error"
       }
     }
   },

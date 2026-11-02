@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -96,6 +97,16 @@ class SimuladorEstado(Base):
     __tablename__ = "simulador_estado"
     id: Mapped[int] = mapped_column(primary_key=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class ConfiguracaoBot(Base):
+    __tablename__ = "configuracao_bot"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    horarios: Mapped[dict] = mapped_column(JSON, nullable=False)
+    dias_fechados: Mapped[list] = mapped_column(JSON, nullable=False)
+    mensagem_fora_expediente: Mapped[str] = mapped_column(Text, nullable=False)
+    mensagem_reabertura: Mapped[str] = mapped_column(Text, nullable=False)
+    mensagem_standby: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class Conversa(Base):

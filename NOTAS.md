@@ -35,7 +35,7 @@
 
 O chat interno usa apenas o banco local, com mensagens entre dois usuários autenticados e atualização a cada 3 segundos. Os setores internos (Vendas, Estoque, Garantia e Administração) são separados dos quatro setores do bot. O gestor define o setor de cada usuário em Equipe. A árvore mostra todos os cadastrados, inclusive offline; contas inativas aparecem sem opção de envio. O indicador “online” ainda é o campo manual configurado pelo gestor; presença automática por sessão fica para a próxima etapa.
 
-Cada usuário pode trocar a própria senha em Minha conta usando a senha atual. O gestor edita e-mail, setor e redefine senhas em Equipe. Integração com SQL Server, importação de usuários/CPF e geração de senhas temporárias dependem do esquema e acesso ao cadastro corporativo e ficam para uma etapa posterior. O CPF não deve ser usado diretamente como senha.
+Cada usuário pode trocar a própria senha em Minha conta usando a senha atual. O gestor edita e-mail, setor e redefine senhas em Equipe. A equipe futura será cadastrada individualmente no sistema novo, sem importar a tabela antiga de funcionários. Banco operacional e serviço de e-mail ainda serão escolhidos. O fluxo de senha temporária por e-mail não está implementado; CPF não deve ser usado como senha.
 ## Limite de mensagens do bot e expediente
 
 Padrão: expediente diário de 07:00 a 18:30 no fuso America/Sao_Paulo; primeira espera de 90 s, aviso com prazo de 60 s e uma prorrogação de 60 s se o cliente responder 1. O máximo por atendente é 210 s. Há duas tentativas automáticas no total (atribuição original e uma transferência). Sem resposta, a conversa entra em standby e o bot para de enviar avisos; o atendente ainda pode responder. Todas as durações e mensagens ficam no .env.

@@ -104,6 +104,16 @@ async def favicon():
     return FileResponse(arquivo)
 
 
+@app.get("/contingencia-sw.js", include_in_schema=False)
+async def contingencia_worker():
+    return FileResponse(web_dir / "contingencia-sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/contingencia.html", include_in_schema=False)
+async def contingencia_pagina():
+    return FileResponse(web_dir / "contingencia.html", media_type="text/html")
+
+
 app.include_router(simulador_router)
 
 

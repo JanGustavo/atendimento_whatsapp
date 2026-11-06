@@ -4401,13 +4401,21 @@ td small {
 .wallpaper-crop-controls input[type="range"], .wallpaper-opacity-control input[type="range"] { width: 100%; accent-color: #ad7e31; }
 .wallpaper-opacity-control { max-width: 480px !important; margin-top: 16px; }
 .atendimento-layout .message-bubble { position: relative; padding-right: 35px; }
-.int-layout .message-bubble { padding-right: 38px; }
+.int-layout .message-bubble { padding-right: 46px; }
 .int-layout .int-bubble-with-author { padding-left: 59px; }
 .int-layout .chat-composer { flex: none; }
 .int-read-only { color: #5e5548; background: #f7f0df; font-size: 13px; font-weight: 700; }
 .inbox-layout.int-layout { height: calc(100dvh - 70px); min-height: 0; }
 @media (max-width: 860px) { .inbox-layout.int-layout { height: calc(100dvh - 70px); min-height: 0; } }
 .demo-mode-toggle[aria-pressed="true"] { border-color: #2e7759; background: #e4f2e9; color: #276347; }
+.manager-row-actions .button-edit { color: #555d6b; background: #eceef1; }
+.manager-row-actions .button-edit:hover:not(:disabled) { background: #dfe3e8; }
+.manager-sectors .button-edit { color: #555d6b; background: #eceef1; }
+.manager-sectors .button-edit:hover:not(:disabled) { background: #dfe3e8; }
+.wallpaper-tone { display: flex; gap: 16px; max-width: 480px; margin: 16px 0 0; padding: 10px 12px; border: 1px solid #d6d0c4; border-radius: 9px; }
+.wallpaper-tone legend { padding: 0 4px; font-size: 12px; font-weight: 700; color: #51535a; }
+.wallpaper-tone label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.wallpaper-tone input { accent-color: #ad7e31; }
 .atendimento-filtros { gap: 4px; padding: 0 10px 10px; scrollbar-width: none; }
 .atendimento-filtros::-webkit-scrollbar { display: none; }
 .atendimento-filtro { gap: 3px; padding: 5px 7px; font-size: 10px; }

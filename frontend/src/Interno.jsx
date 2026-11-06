@@ -61,6 +61,7 @@ const iniciais = nome => {
   const numero = partes.at(-1)?.match(/^0*(\d+)$/)
   return numero ? `${partes[0]?.[0]?.toUpperCase() || 'C'}${numero[1]}` : partes.slice(0, 2).map(parte => parte[0].toUpperCase()).join('')
 }
+const nomeApresentacao = pessoa => `${({ gestor: 'Gestor', supervisor: 'Supervisor' })[pessoa.role] || 'Colaborador'} ${pessoa.id}`
 const plural = (n, singular, pluralForma) => `${n} ${n === 1 ? singular : pluralForma}`
 const proximos = (a, b) => { const dif = new Date(b) - new Date(a); return dif >= 0 && dif < JANELA_AGRUPAR_MS }
 
@@ -829,7 +830,7 @@ export default function Interno({ me, abrirColegaId, onOpen, onUnreadChange, onV
   }, [atualizarConversas])
 
   const setores = useSetores(setErro)
-  const setoresVisiveis = modoApresentacao ? setores.map(setor => ({ ...setor, pessoas: setor.pessoas.map(pessoa => ({ ...pessoa, nome: `Colaborador ${pessoa.id}`, foto_url: null })) })) : setores
+  const setoresVisiveis = modoApresentacao ? setores.map(setor => ({ ...setor, pessoas: setor.pessoas.map(pessoa => ({ ...pessoa, nome: nomeApresentacao(pessoa), foto_url: null })) })) : setores
   const conversasVisiveis = modoApresentacao ? conversas.map(item => ({ ...item, nome: item.tipo === 'grupo' ? item.nome : `Colaborador ${item.alvo_id}`, foto_url: null, ultimo_remetente: item.ultimo_remetente ? 'Colaborador' : null, ultima_previa: item.ultima_previa ? 'Mensagem de demonstração' : null })) : conversas
   const pessoas = useMemo(() => setores.flatMap(setor => setor.pessoas), [setores])
   // versão atualizada (online/offline) do item selecionado
@@ -888,7 +889,7 @@ export default function Interno({ me, abrirColegaId, onOpen, onUnreadChange, onV
               key={rotas.mensagens}
               rotas={rotas}
               grupo={grupo}
-              colega={modoApresentacao && colega ? { ...colega, nome: `Colaborador ${colega.id}`, foto_url: null } : colega}
+              colega={modoApresentacao && colega ? { ...colega, nome: nomeApresentacao(colega), foto_url: null } : colega}
               me={me}
               modoApresentacao={modoApresentacao}
               onVoltar={voltar}

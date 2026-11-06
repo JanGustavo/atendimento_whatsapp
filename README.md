@@ -34,9 +34,9 @@ Em **Minha conta → Papel de parede**, escolha ou recorte uma imagem com zoom e
 
 Para receber mensagens da Meta, crie um Cloudflare Tunnel dedicado, copie seu token para `CLOUDFLARE_TUNNEL_TOKEN` no `.env` e inicie `docker compose --profile webhook up -d`. Na rota publicada do túnel, use o hostname desejado, o caminho `^/webhook/whatsapp$` e o serviço `http://app:8000`. Na Meta, configure `https://<hostname>/webhook/whatsapp`, o valor de `META_VERIFY_TOKEN` e assine o campo `messages`.
 
-## Plano de migração SQL Server e funcionários
+## Plano futuro de banco e cadastro
 
-A migração está documentada em [`docs/migracao-sql-server-funcionarios.md`](docs/migracao-sql-server-funcionarios.md). Ela define a leitura da tabela `funcionarios`, o mapeamento para contas e setores, sincronização idempotente e provisionamento de credenciais temporárias sem usar CPF como senha. A aplicação continua em SQLite até uma etapa separada de migração, testes e aprovação operacional.
+O plano está em [`docs/plano-banco-cadastro.md`](docs/plano-banco-cadastro.md). A equipe será cadastrada do zero, sem importar a tabela antiga `funcionarios`. A escolha do banco operacional (PostgreSQL, SQL Server ou outro) e o envio de e-mails de primeiro acesso ficam para uma etapa futura. A aplicação continua em SQLite por enquanto.
 
 ## Painel HTTPS
 

@@ -35,7 +35,7 @@ const pageByRoute = Object.fromEntries(
   Object.entries(routeByPage).map(([page, route]) => [route, page]),
 )
 const SETOR_ICONES = [
-  ['equipe', 'Equipe'], ['vendas', 'Vendas'], ['estoque', 'Estoque'],
+  ['equipe', 'Equipe'], ['vendas', 'Vendas/Compra'], ['estoque', 'Estoque'],
   ['garantia', 'Garantia'], ['devolucao', 'Devolução'],
   ['atendimento', 'Atendimento'], ['administracao', 'Administração'],
 ]
@@ -1007,7 +1007,7 @@ function InternalSectorEditor({ sector, membros, vinculados, onSave, onDelete, b
     <Fragment>
       <tr>
         <td><div className="manager-contact"><span className="manager-sector-icon"><Icone nome={icone} tamanho={20} /></span><div><strong>{nome}</strong><small>Equipe interna</small></div></div></td>
-        <td>{SETOR_ICONES.find(item => item[0] === icone)?.[1]}</td>
+        <td><span className="manager-sector-icon" title={SETOR_ICONES.find(item => item[0] === icone)?.[1]}><Icone nome={icone} tamanho={20} /></span></td>
         <td>{membros} {membros === 1 ? 'membro ativo' : 'membros ativos'}</td>
         <td><span className={`manager-state ${membros >= 2 ? 'is-active' : ''}`}>{membros >= 2 ? 'Grupo ativo' : 'Grupo inativo'}</span></td>
         <td><div className="manager-row-actions"><button type="button" className="button button-edit" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? 'Fechar' : 'Editar'}</button><button type="button" className="button button-danger" disabled={busy || sector.id === 1 || vinculados > 0} title={sector.id === 1 ? 'Vendas é necessário para a distribuição' : vinculados > 0 ? 'Transfira os usuários antes de excluir' : 'Excluir setor sem histórico'} onClick={() => { if (window.confirm(`Excluir o setor ${sector.nome}? Esta ação não pode ser desfeita.`)) onDelete(sector.id) }}>Excluir</button></div></td>
@@ -1018,7 +1018,7 @@ function InternalSectorEditor({ sector, membros, vinculados, onSave, onDelete, b
       }}>
         <label>Nome<input aria-label={`Nome da equipe ${sector.nome}`} value={nome} onChange={evento => setNome(evento.target.value)} maxLength="80" required /></label>
         <SeletorIcone valor={icone} onChange={setIcone} />
-        <button className="button button-success" disabled={busy}>Salvar</button>
+        <button className="button button-primary" disabled={busy}>Salvar</button>
       </form></td></tr>}
     </Fragment>
   )
@@ -1551,7 +1551,7 @@ export default function App() {
   } : detail
   const configuracaoVisivel = modoApresentacao && config ? { ...config, usuarios: config.usuarios?.map(usuarioDemonstracao) } : config
   const computadoresVisiveis = modoApresentacao ? computadores.map(pc => ({ ...pc, nome: nomeDemonstracao('Computador', pc.id), dono_nome: nomeDemonstracao('Colaborador', pc.dono_id) })) : computadores
-  const chamadosVisiveis = modoApresentacao ? chamados.map(chamado => ({ ...chamado, computador_nome: nomeDemonstracao('Computador', chamado.computador_id), dono_nome: nomeDemonstracao('Colaborador', chamado.dono_id), descricao: 'O sistema não abre no computador.', solucao: chamado.solucao ? 'Sistema reiniciado e acesso confirmado.' : chamado.solucao, acessos: chamado.acessos?.map(acesso => ({ ...acesso, solicitante: 'Técnico', acesso_url: null })) || [] })) : chamados
+  const chamadosVisiveis = modoApresentacao ? chamados.map(chamado => ({ ...chamado, computador_nome: nomeDemonstracao('Computador', chamado.computador_id), dono_nome: nomeDemonstracao('Colaborador', chamado.dono_id), descricao: 'O sistema não abre no computador.', solucao: chamado.solucao ? 'Sistema reiniciado e acesso confirmado.' : null, acessos: chamado.acessos?.map(acesso => ({ ...acesso, solicitante: 'Técnico', acesso_url: null })) || [] })) : chamados
   // Controle de respostas fora de ordem no polling: só a consulta mais recente, da conversa e da busca
   // atuais, pode atualizar a tela.
   const selectedIdRef = useRef(null)
@@ -1841,13 +1841,14 @@ export default function App() {
   useEffect(() => {
     if (page !== 'manager') return
     refreshConfig()
+    const configInterval = setInterval(refreshConfig, 10000)
     const refreshStatus = () =>
       getJSON('/api/gestor/whatsapp-status')
         .then(setWhatsappStatus)
         .catch(() => setWhatsappStatus({ status: 'desconectado' }))
     refreshStatus()
     const interval = setInterval(refreshStatus, 10000)
-    return () => clearInterval(interval)
+    return () => { clearInterval(interval); clearInterval(configInterval) }
   }, [page, refreshConfig])
   useEffect(() => {
     if (!me || me.role === 'colaborador') return
@@ -2116,7 +2117,7 @@ export default function App() {
             FortGiro <span>/</span> <strong>{headerTitle}</strong>
           </div>
           <div className="topbar-right">
-            <button type="button" className="demo-mode-toggle" onClick={() => { const novo = !modoApresentacao; sessionStorage.setItem('fortgiro-apresentacao', novo ? '1' : '0'); if (location.search) history.replaceState({}, '', location.pathname); setModoApresentacao(novo) }} aria-pressed={modoApresentacao}>Modo apresentação: {modoApresentacao ? 'ligado' : 'desligado'}</button>
+            <button type="button" className="demo-mode-toggle" onClick={() => { const novo = !modoApresentacao; sessionStorage.setItem('fortgiro-apresentacao', novo ? '1' : '0'); if (location.search) history.replaceState({}, '', location.pathname); setModoApresentacao(novo) }} aria-pressed={modoApresentacao}>Modo apresentação · {modoApresentacao ? 'Ligado' : 'Desligado'}</button>
             <span className="topbar-date">
               {messageDay(new Date().toISOString())}
             </span>

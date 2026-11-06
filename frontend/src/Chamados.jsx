@@ -55,7 +55,7 @@ function RegistroAcessos({ acessos }) {
 }
 
 function SolucaoRegistrada({ solucao }) {
-  return <div className="ticket-solution chamados-solucao"><strong>Solução registrada</strong><p>{solucao}</p></div>
+  return <div className="ticket-solution chamados-solucao"><strong>Solução registrada</strong><p>{solucao === 'Nada' ? 'Ainda não registrada.' : solucao}</p></div>
 }
 
 /* Cartão usado nas duas visões. `visaoEquipe` liga grupo do PC e registro de acessos;
